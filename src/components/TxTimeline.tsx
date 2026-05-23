@@ -43,15 +43,18 @@ export function TxTimeline({ state }: { state: TxState }) {
   );
 }
 
-function label(s: TxState) {
-  return { CREATED: "Transaction created", FUNDED: "Escrow funded", SHIPPED: "Item shipped", DELIVERED: "Item delivered", RELEASED: "Funds released" }[s] ?? s;
+function label(s: TxState): string {
+  const map: Record<TxState, string> = {
+    CREATED: "Transaction created", FUNDED: "Escrow funded", SHIPPED: "Item shipped",
+    DELIVERED: "Item delivered", RELEASED: "Funds released", DISPUTED: "Disputed", REFUNDED: "Refunded",
+  };
+  return map[s];
 }
-function sub(s: TxState) {
-  return {
-    CREATED: "Awaiting buyer payment",
-    FUNDED: "Funds locked in escrow",
-    SHIPPED: "Seller dispatched the item",
-    DELIVERED: "Buyer to confirm receipt",
-    RELEASED: "Payment sent to seller",
-  }[s] ?? "";
+function sub(s: TxState): string {
+  const map: Record<TxState, string> = {
+    CREATED: "Awaiting buyer payment", FUNDED: "Funds locked in escrow",
+    SHIPPED: "Seller dispatched the item", DELIVERED: "Buyer to confirm receipt",
+    RELEASED: "Payment sent to seller", DISPUTED: "Under review", REFUNDED: "Returned to buyer",
+  };
+  return map[s];
 }
