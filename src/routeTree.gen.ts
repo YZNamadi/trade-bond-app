@@ -12,7 +12,17 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as RoleSelectRouteImport } from './routes/role-select'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as BuyerRouteImport } from './routes/buyer'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BuyerIndexRouteImport } from './routes/buyer.index'
+import { Route as BuyerWalletRouteImport } from './routes/buyer.wallet'
+import { Route as BuyerTransactionsRouteImport } from './routes/buyer.transactions'
+import { Route as BuyerStartRouteImport } from './routes/buyer.start'
+import { Route as BuyerSettingsRouteImport } from './routes/buyer.settings'
+import { Route as BuyerNotificationsRouteImport } from './routes/buyer.notifications'
+import { Route as BuyerDiscoverRouteImport } from './routes/buyer.discover'
+import { Route as BuyerTransactionsIdRouteImport } from './routes/buyer.transactions.$id'
+import { Route as BuyerSellerIdRouteImport } from './routes/buyer.seller.$id'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -29,41 +39,163 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BuyerRoute = BuyerRouteImport.update({
+  id: '/buyer',
+  path: '/buyer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BuyerIndexRoute = BuyerIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerWalletRoute = BuyerWalletRouteImport.update({
+  id: '/wallet',
+  path: '/wallet',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerTransactionsRoute = BuyerTransactionsRouteImport.update({
+  id: '/transactions',
+  path: '/transactions',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerStartRoute = BuyerStartRouteImport.update({
+  id: '/start',
+  path: '/start',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerSettingsRoute = BuyerSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerNotificationsRoute = BuyerNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerDiscoverRoute = BuyerDiscoverRouteImport.update({
+  id: '/discover',
+  path: '/discover',
+  getParentRoute: () => BuyerRoute,
+} as any)
+const BuyerTransactionsIdRoute = BuyerTransactionsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => BuyerTransactionsRoute,
+} as any)
+const BuyerSellerIdRoute = BuyerSellerIdRouteImport.update({
+  id: '/seller/$id',
+  path: '/seller/$id',
+  getParentRoute: () => BuyerRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/buyer': typeof BuyerRouteWithChildren
   '/login': typeof LoginRoute
   '/role-select': typeof RoleSelectRoute
   '/signup': typeof SignupRoute
+  '/buyer/discover': typeof BuyerDiscoverRoute
+  '/buyer/notifications': typeof BuyerNotificationsRoute
+  '/buyer/settings': typeof BuyerSettingsRoute
+  '/buyer/start': typeof BuyerStartRoute
+  '/buyer/transactions': typeof BuyerTransactionsRouteWithChildren
+  '/buyer/wallet': typeof BuyerWalletRoute
+  '/buyer/': typeof BuyerIndexRoute
+  '/buyer/seller/$id': typeof BuyerSellerIdRoute
+  '/buyer/transactions/$id': typeof BuyerTransactionsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/role-select': typeof RoleSelectRoute
   '/signup': typeof SignupRoute
+  '/buyer/discover': typeof BuyerDiscoverRoute
+  '/buyer/notifications': typeof BuyerNotificationsRoute
+  '/buyer/settings': typeof BuyerSettingsRoute
+  '/buyer/start': typeof BuyerStartRoute
+  '/buyer/transactions': typeof BuyerTransactionsRouteWithChildren
+  '/buyer/wallet': typeof BuyerWalletRoute
+  '/buyer': typeof BuyerIndexRoute
+  '/buyer/seller/$id': typeof BuyerSellerIdRoute
+  '/buyer/transactions/$id': typeof BuyerTransactionsIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/buyer': typeof BuyerRouteWithChildren
   '/login': typeof LoginRoute
   '/role-select': typeof RoleSelectRoute
   '/signup': typeof SignupRoute
+  '/buyer/discover': typeof BuyerDiscoverRoute
+  '/buyer/notifications': typeof BuyerNotificationsRoute
+  '/buyer/settings': typeof BuyerSettingsRoute
+  '/buyer/start': typeof BuyerStartRoute
+  '/buyer/transactions': typeof BuyerTransactionsRouteWithChildren
+  '/buyer/wallet': typeof BuyerWalletRoute
+  '/buyer/': typeof BuyerIndexRoute
+  '/buyer/seller/$id': typeof BuyerSellerIdRoute
+  '/buyer/transactions/$id': typeof BuyerTransactionsIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/role-select' | '/signup'
+  fullPaths:
+    | '/'
+    | '/buyer'
+    | '/login'
+    | '/role-select'
+    | '/signup'
+    | '/buyer/discover'
+    | '/buyer/notifications'
+    | '/buyer/settings'
+    | '/buyer/start'
+    | '/buyer/transactions'
+    | '/buyer/wallet'
+    | '/buyer/'
+    | '/buyer/seller/$id'
+    | '/buyer/transactions/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/role-select' | '/signup'
-  id: '__root__' | '/' | '/login' | '/role-select' | '/signup'
+  to:
+    | '/'
+    | '/login'
+    | '/role-select'
+    | '/signup'
+    | '/buyer/discover'
+    | '/buyer/notifications'
+    | '/buyer/settings'
+    | '/buyer/start'
+    | '/buyer/transactions'
+    | '/buyer/wallet'
+    | '/buyer'
+    | '/buyer/seller/$id'
+    | '/buyer/transactions/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/buyer'
+    | '/login'
+    | '/role-select'
+    | '/signup'
+    | '/buyer/discover'
+    | '/buyer/notifications'
+    | '/buyer/settings'
+    | '/buyer/start'
+    | '/buyer/transactions'
+    | '/buyer/wallet'
+    | '/buyer/'
+    | '/buyer/seller/$id'
+    | '/buyer/transactions/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BuyerRoute: typeof BuyerRouteWithChildren
   LoginRoute: typeof LoginRoute
   RoleSelectRoute: typeof RoleSelectRoute
   SignupRoute: typeof SignupRoute
@@ -92,6 +224,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/buyer': {
+      id: '/buyer'
+      path: '/buyer'
+      fullPath: '/buyer'
+      preLoaderRoute: typeof BuyerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -99,11 +238,110 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/buyer/': {
+      id: '/buyer/'
+      path: '/'
+      fullPath: '/buyer/'
+      preLoaderRoute: typeof BuyerIndexRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/wallet': {
+      id: '/buyer/wallet'
+      path: '/wallet'
+      fullPath: '/buyer/wallet'
+      preLoaderRoute: typeof BuyerWalletRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/transactions': {
+      id: '/buyer/transactions'
+      path: '/transactions'
+      fullPath: '/buyer/transactions'
+      preLoaderRoute: typeof BuyerTransactionsRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/start': {
+      id: '/buyer/start'
+      path: '/start'
+      fullPath: '/buyer/start'
+      preLoaderRoute: typeof BuyerStartRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/settings': {
+      id: '/buyer/settings'
+      path: '/settings'
+      fullPath: '/buyer/settings'
+      preLoaderRoute: typeof BuyerSettingsRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/notifications': {
+      id: '/buyer/notifications'
+      path: '/notifications'
+      fullPath: '/buyer/notifications'
+      preLoaderRoute: typeof BuyerNotificationsRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/discover': {
+      id: '/buyer/discover'
+      path: '/discover'
+      fullPath: '/buyer/discover'
+      preLoaderRoute: typeof BuyerDiscoverRouteImport
+      parentRoute: typeof BuyerRoute
+    }
+    '/buyer/transactions/$id': {
+      id: '/buyer/transactions/$id'
+      path: '/$id'
+      fullPath: '/buyer/transactions/$id'
+      preLoaderRoute: typeof BuyerTransactionsIdRouteImport
+      parentRoute: typeof BuyerTransactionsRoute
+    }
+    '/buyer/seller/$id': {
+      id: '/buyer/seller/$id'
+      path: '/seller/$id'
+      fullPath: '/buyer/seller/$id'
+      preLoaderRoute: typeof BuyerSellerIdRouteImport
+      parentRoute: typeof BuyerRoute
+    }
   }
 }
 
+interface BuyerTransactionsRouteChildren {
+  BuyerTransactionsIdRoute: typeof BuyerTransactionsIdRoute
+}
+
+const BuyerTransactionsRouteChildren: BuyerTransactionsRouteChildren = {
+  BuyerTransactionsIdRoute: BuyerTransactionsIdRoute,
+}
+
+const BuyerTransactionsRouteWithChildren =
+  BuyerTransactionsRoute._addFileChildren(BuyerTransactionsRouteChildren)
+
+interface BuyerRouteChildren {
+  BuyerDiscoverRoute: typeof BuyerDiscoverRoute
+  BuyerNotificationsRoute: typeof BuyerNotificationsRoute
+  BuyerSettingsRoute: typeof BuyerSettingsRoute
+  BuyerStartRoute: typeof BuyerStartRoute
+  BuyerTransactionsRoute: typeof BuyerTransactionsRouteWithChildren
+  BuyerWalletRoute: typeof BuyerWalletRoute
+  BuyerIndexRoute: typeof BuyerIndexRoute
+  BuyerSellerIdRoute: typeof BuyerSellerIdRoute
+}
+
+const BuyerRouteChildren: BuyerRouteChildren = {
+  BuyerDiscoverRoute: BuyerDiscoverRoute,
+  BuyerNotificationsRoute: BuyerNotificationsRoute,
+  BuyerSettingsRoute: BuyerSettingsRoute,
+  BuyerStartRoute: BuyerStartRoute,
+  BuyerTransactionsRoute: BuyerTransactionsRouteWithChildren,
+  BuyerWalletRoute: BuyerWalletRoute,
+  BuyerIndexRoute: BuyerIndexRoute,
+  BuyerSellerIdRoute: BuyerSellerIdRoute,
+}
+
+const BuyerRouteWithChildren = BuyerRoute._addFileChildren(BuyerRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BuyerRoute: BuyerRouteWithChildren,
   LoginRoute: LoginRoute,
   RoleSelectRoute: RoleSelectRoute,
   SignupRoute: SignupRoute,
@@ -111,3 +349,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
