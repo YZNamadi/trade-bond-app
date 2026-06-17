@@ -1,33 +1,35 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { ArrowLeft, Mail, Lock, Eye, EyeOff } from "lucide-react";
-import { store, type Role } from "@/lib/mock-store";
+import { store } from "@/lib/mock-store";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    role: (search.role as Role) || "buyer",
-  }),
+  validateSearch: (s: Record<string, unknown>) => ({ email: (s.email as string) || "" }),
   component: Login,
 });
 
 function Login() {
-  const { role } = Route.useSearch();
+  const search = Route.useSearch();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(search.email || "");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) return toast.error("Fill in all fields");
     setLoading(true);
-    setTimeout(() => {
-      store.setSession({ email, name: email.split("@")[0], role });
+    try {
+      const session = await store.login(email, password);
       toast.success("Welcome back");
-      navigate({ to: role === "buyer" ? "/buyer" : "/seller" });
-    }, 800);
+      navigate({ to: session.role === "admin" ? "/admin" : session.role === "buyer" ? "/buyer" : "/seller" });
+    } catch (e: any) {
+      toast.error(e?.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -38,9 +40,7 @@ function Login() {
 
       <div className="mt-8 animate-[fade-in_0.4s_ease-out]">
         <h1 className="text-3xl font-bold tracking-tight">Welcome back</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Log in as a <span className="font-semibold capitalize text-primary">{role}</span>.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">Log in to your buyer or seller account.</p>
       </div>
 
       <form onSubmit={submit} className="mt-8 space-y-4">
@@ -66,7 +66,9 @@ function Login() {
         </Field>
 
         <div className="flex justify-end">
-          <button type="button" className="text-sm font-medium text-primary tap-scale">Forgot password?</button>
+          <Link to="/forgot-password" search={{ email }} className="text-sm font-medium text-primary tap-scale">
+            Forgot password?
+          </Link>
         </div>
 
         <button
@@ -79,7 +81,7 @@ function Login() {
 
       <p className="mt-auto pt-8 text-center text-sm text-muted-foreground">
         New here?{" "}
-        <Link to="/signup" search={{ role }} className="font-semibold text-primary">Create an account</Link>
+        <Link to="/signup" className="font-semibold text-primary">Create an account</Link>
       </p>
     </div>
   );

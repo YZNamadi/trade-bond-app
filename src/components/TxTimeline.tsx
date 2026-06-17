@@ -2,11 +2,11 @@ import { TX_FLOW, type TxState } from "@/lib/mock-store";
 import { Check } from "lucide-react";
 
 export function TxTimeline({ state }: { state: TxState }) {
-  if (state === "DISPUTED" || state === "REFUNDED") {
+  if (state === "DISPUTED" || state === "REFUND_PENDING" || state === "REFUNDED") {
     return (
       <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
         <div className="text-sm font-semibold text-destructive">
-          {state === "DISPUTED" ? "Transaction is under dispute" : "Funds were refunded"}
+          {state === "DISPUTED" ? "Transaction is under dispute" : state === "REFUND_PENDING" ? "Refund is processing" : "Funds were refunded"}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">Our team is reviewing. You'll be notified of any updates.</p>
       </div>
@@ -46,7 +46,7 @@ export function TxTimeline({ state }: { state: TxState }) {
 function label(s: TxState): string {
   const map: Record<TxState, string> = {
     CREATED: "Transaction created", FUNDED: "Escrow funded", SHIPPED: "Item shipped",
-    DELIVERED: "Item delivered", RELEASED: "Funds released", DISPUTED: "Disputed", REFUNDED: "Refunded",
+    DELIVERED: "Item delivered", RELEASE_PENDING: "Release processing", RELEASED: "Funds released", DISPUTED: "Disputed", REFUND_PENDING: "Refund processing", REFUNDED: "Refunded",
   };
   return map[s];
 }
@@ -54,7 +54,7 @@ function sub(s: TxState): string {
   const map: Record<TxState, string> = {
     CREATED: "Awaiting buyer payment", FUNDED: "Funds locked in escrow",
     SHIPPED: "Seller dispatched the item", DELIVERED: "Buyer to confirm receipt",
-    RELEASED: "Payment sent to seller", DISPUTED: "Under review", REFUNDED: "Returned to buyer",
+    RELEASE_PENDING: "Payout is being sent by provider", RELEASED: "Payment sent to seller", DISPUTED: "Under review", REFUND_PENDING: "Provider is processing refund", REFUNDED: "Returned to buyer",
   };
   return map[s];
 }

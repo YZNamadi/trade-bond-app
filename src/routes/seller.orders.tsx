@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useState } from "react";
 import { formatNGN, timeAgo, useStore, type TxState } from "@/lib/mock-store";
 import { TxStatusBadge } from "@/components/TxStatusBadge";
@@ -11,13 +11,19 @@ const TABS: { label: string; states: TxState[] | null }[] = [
   { label: "All", states: null },
   { label: "Pending ship", states: ["FUNDED"] },
   { label: "Shipped", states: ["SHIPPED", "DELIVERED"] },
-  { label: "Completed", states: ["RELEASED"] },
+  { label: "Completed", states: ["RELEASE_PENDING", "RELEASED"] },
 ];
 
 function Orders() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isIndex = pathname === "/seller/orders" || pathname === "/seller/orders/";
   const txs = useStore((s) => s.transactions);
   const [tab, setTab] = useState(0);
-  const list = TABS[tab].states ? txs.filter((t) => TABS[tab].states!.includes(t.state)) : txs;
+  const list = isIndex
+    ? (TABS[tab].states ? txs.filter((t) => TABS[tab].states!.includes(t.state)) : txs)
+    : [];
+
+  if (!isIndex) return <Outlet />;
 
   return (
     <div className="px-5 pb-6 pt-12">
@@ -47,10 +53,7 @@ function Orders() {
               </div>
               <TxStatusBadge state={tx.state} />
             </div>
-            <div className="mt-3 flex items-end justify-between">
-              <div className="text-lg font-bold">{formatNGN(tx.amount)}</div>
-              <div className="text-xs text-muted-foreground">{tx.reference}</div>
-            </div>
+            <div className="mt-3 text-lg font-bold">{formatNGN(tx.amount)}</div>
           </Link>
         ))}
       </div>

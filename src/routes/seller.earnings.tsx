@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { TrendingUp, ArrowUpRight, CheckCircle2 } from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
+import { TrendingUp, CheckCircle2 } from "lucide-react";
 import { formatNGN, useStore } from "@/lib/mock-store";
 
 export const Route = createFileRoute("/seller/earnings")({
@@ -7,9 +7,49 @@ export const Route = createFileRoute("/seller/earnings")({
 });
 
 function Earnings() {
-  const earnings = useStore((s) => s.earningsAvailable);
-  const completed = useStore((s) => s.transactions.filter((t) => t.state === "RELEASED"));
-  const totalEarned = completed.reduce((acc, t) => acc + t.amount, 0);
+  const completed = useStore((s) => (Array.isArray(s.transactions) ? s.transactions : []).filter((t) => t?.state === "RELEASED"));
+  const totalEarned = completed.reduce((acc, t) => acc + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0), 0);
+
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startOfDay = (ts: number) => {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  const todayStart = startOfDay(now);
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const start = todayStart - (6 - i) * dayMs;
+    return { start, end: start + dayMs };
+  });
+  const dayLabel = (start: number) => new Intl.DateTimeFormat("en", { weekday: "short" }).format(new Date(start));
+
+  const last7 = days.map((d) => {
+    const sum = completed.reduce((acc, t) => {
+      const ts = Number.isFinite(Number(t.updatedAt)) ? Number(t.updatedAt) : Number(t.createdAt);
+      if (!Number.isFinite(ts)) return acc;
+      if (ts >= d.start && ts < d.end) {
+        return acc + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0);
+      }
+      return acc;
+    }, 0);
+    return { ...d, sum };
+  });
+  const max = Math.max(0, ...last7.map((d) => d.sum));
+  const total7 = last7.reduce((acc, d) => acc + d.sum, 0);
+
+  const prevStart = todayStart - 13 * dayMs;
+  const prevEnd = todayStart - 6 * dayMs;
+  const prev7 = completed.reduce((acc, t) => {
+    const ts = Number.isFinite(Number(t.updatedAt)) ? Number(t.updatedAt) : Number(t.createdAt);
+    if (!Number.isFinite(ts)) return acc;
+    if (ts >= prevStart && ts < prevEnd) {
+      return acc + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0);
+    }
+    return acc;
+  }, 0);
+  const pct = prev7 > 0 ? ((total7 - prev7) / prev7) * 100 : total7 > 0 ? 100 : 0;
+  const pctLabel = `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 
   return (
     <div className="px-5 pb-6 pt-12">
@@ -20,24 +60,35 @@ function Earnings() {
         <div className="text-xs text-white/70 flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Total earnings</div>
         <div className="mt-1 text-4xl font-bold tracking-tight">{formatNGN(totalEarned)}</div>
         <div className="mt-1 text-xs text-white/80">{completed.length} completed transactions</div>
-        <Link to="/seller/withdraw" className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white font-semibold text-primary tap-scale">
-          <ArrowUpRight className="h-4 w-4" /> Withdraw {formatNGN(earnings)}
-        </Link>
       </div>
 
-      {/* Chart placeholder */}
       <div className="mt-4 rounded-2xl border border-border bg-card p-4">
         <div className="flex items-center justify-between text-xs">
           <span className="font-semibold text-muted-foreground">Last 7 days</span>
-          <span className="font-bold text-success">+18.2%</span>
+          <span className={`font-bold ${pct >= 0 ? "text-success" : "text-destructive"}`}>{pctLabel}</span>
         </div>
         <div className="mt-3 flex h-24 items-end gap-1.5">
-          {[35, 52, 41, 68, 75, 58, 89].map((h, i) => (
-            <div key={i} className="flex-1 rounded-t-lg bg-[var(--gradient-accent)] transition-all hover:opacity-80" style={{ height: `${h}%`, animation: `slide-up 0.5s ease-out ${i * 60}ms both` }} />
-          ))}
+          {last7.map((d, i) => {
+            const h = max > 0 ? Math.round((d.sum / max) * 100) : 0;
+            const height = d.sum > 0 ? Math.max(6, h) : 2;
+            return (
+              <div
+                key={d.start}
+                title={`${dayLabel(d.start)} • ${formatNGN(d.sum)}`}
+                className={`flex-1 rounded-t-lg transition-all ${d.sum > 0 ? "bg-[var(--gradient-accent)] hover:opacity-80" : "bg-border"}`}
+                style={{ height: `${height}%`, animation: `slide-up 0.5s ease-out ${i * 60}ms both` }}
+              />
+            );
+          })}
         </div>
         <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
-          {["M","T","W","T","F","S","S"].map((d, i) => <span key={i}>{d}</span>)}
+          {last7.map((d) => (
+            <span key={d.start}>{dayLabel(d.start).slice(0, 1)}</span>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground">
+          <span>Total</span>
+          <span className="font-semibold text-foreground/80">{formatNGN(total7)}</span>
         </div>
       </div>
 
@@ -56,7 +107,7 @@ function Earnings() {
                   <div className="truncate text-sm font-semibold">{tx.title}</div>
                   <div className="text-xs text-muted-foreground">{tx.buyerName}</div>
                 </div>
-                <div className="text-sm font-bold text-success">+{formatNGN(tx.amount)}</div>
+                <div className="text-sm font-bold text-success">+{formatNGN(Number.isFinite(Number(tx.amount)) ? Number(tx.amount) : 0)}</div>
               </div>
             ))}
           </div>

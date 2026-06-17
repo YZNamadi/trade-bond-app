@@ -11,7 +11,7 @@ export function BottomNav({ items }: { items: NavItem[] }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   return (
     <nav className="sticky bottom-0 z-30 mt-auto border-t border-border bg-card/90 backdrop-blur-xl pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
-      <div className="grid grid-cols-5 gap-1 px-2">
+      <div className="mx-auto grid w-full max-w-md grid-flow-col auto-cols-fr gap-1 px-2">
         {items.map((item) => {
           const active = pathname === item.to || (item.to !== "/buyer" && item.to !== "/seller" && pathname.startsWith(item.to));
           const Icon = item.icon;

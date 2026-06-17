@@ -1,12 +1,17 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { LayoutDashboard, Package, TrendingUp, Wallet, Settings } from "lucide-react";
+import { LayoutDashboard, Package, TrendingUp, Settings } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { store } from "@/lib/mock-store";
 
 export const Route = createFileRoute("/seller")({
-  beforeLoad: () => {
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+    if (!store.get().session) {
+      await store.bootstrap();
+    }
     const s = store.get().session;
     if (!s) throw redirect({ to: "/role-select" });
+    if (s.role === "admin") throw redirect({ to: "/admin" });
     if (s.role !== "seller") throw redirect({ to: "/buyer" });
   },
   component: SellerShell,
@@ -23,7 +28,6 @@ function SellerShell() {
           { to: "/seller", label: "Home", icon: LayoutDashboard },
           { to: "/seller/orders", label: "Orders", icon: Package },
           { to: "/seller/earnings", label: "Earnings", icon: TrendingUp },
-          { to: "/seller/wallet", label: "Wallet", icon: Wallet },
           { to: "/seller/settings", label: "Settings", icon: Settings },
         ]}
       />

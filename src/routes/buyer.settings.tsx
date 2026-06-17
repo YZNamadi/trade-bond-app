@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, LogOut, Bell, Lock, HelpCircle, ShieldCheck, Repeat } from "lucide-react";
+import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { ChevronRight, LogOut, Bell, Lock, HelpCircle, Users } from "lucide-react";
 import { store, useStore } from "@/lib/mock-store";
 
 export const Route = createFileRoute("/buyer/settings")({
@@ -7,13 +7,13 @@ export const Route = createFileRoute("/buyer/settings")({
 });
 
 function SettingsPage() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isIndex = pathname === "/buyer/settings" || pathname === "/buyer/settings/";
   const navigate = useNavigate();
   const session = useStore((s) => s.session);
+  const accounts = useStore((s) => s.accounts);
 
-  const switchRole = () => {
-    store.setRole("seller");
-    navigate({ to: "/seller" });
-  };
+  if (!isIndex) return <Outlet />;
 
   return (
     <div className="px-5 pb-6 pt-12">
@@ -31,18 +31,17 @@ function SettingsPage() {
       </div>
 
       <Section title="Account">
-        <Row icon={<ShieldCheck className="h-4 w-4" />} label="Verification" hint="Verified" />
-        <Row icon={<Lock className="h-4 w-4" />} label="Security & password" />
-        <Row icon={<Bell className="h-4 w-4" />} label="Notifications" />
+        <Row icon={<Lock className="h-4 w-4" />} label="Security & password" href="/buyer/settings/security" />
+        <Row icon={<Bell className="h-4 w-4" />} label="Notifications" href="/buyer/settings/notifications" />
       </Section>
 
       <Section title="App">
-        <Row icon={<Repeat className="h-4 w-4" />} label="Switch to seller" onClick={switchRole} />
-        <Row icon={<HelpCircle className="h-4 w-4" />} label="Help & support" />
+        <Row icon={<Users className="h-4 w-4" />} label="Accounts" hint={`${accounts.length} saved`} href="/role-select" />
+        <Row icon={<HelpCircle className="h-4 w-4" />} label="Help & support" href="/buyer/settings/support" />
       </Section>
 
       <button
-        onClick={() => { store.signOut(); navigate({ to: "/role-select" }); }}
+        onClick={async () => { await store.signOut(); navigate({ to: "/role-select" }); }}
         className="mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/5 font-semibold text-destructive tap-scale"
       >
         <LogOut className="h-4 w-4" /> Log out
@@ -62,13 +61,23 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ icon, label, hint, onClick }: { icon: React.ReactNode; label: string; hint?: string; onClick?: () => void }) {
+function Row({
+  icon,
+  label,
+  hint,
+  href,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  hint?: string;
+  href: string;
+}) {
   return (
-    <button onClick={onClick} className="flex w-full items-center gap-3 p-4 text-left tap-scale hover:bg-muted/40">
+    <a href={href} className="flex w-full items-center gap-3 p-4 text-left tap-scale hover:bg-muted/40">
       <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-primary">{icon}</div>
       <div className="flex-1 text-sm font-medium">{label}</div>
       {hint && <span className="text-xs font-semibold text-success">{hint}</span>}
       <ChevronRight className="h-4 w-4 text-muted-foreground" />
-    </button>
+    </a>
   );
 }

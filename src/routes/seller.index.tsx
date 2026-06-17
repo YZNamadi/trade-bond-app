@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Bell, Package, TrendingUp, Truck, ArrowRight } from "lucide-react";
+import { Bell, Package, TrendingUp, Truck, ArrowRight, ShieldCheck } from "lucide-react";
 import { formatNGN, timeAgo, useStore } from "@/lib/mock-store";
 import { TxStatusBadge } from "@/components/TxStatusBadge";
 
@@ -9,10 +9,10 @@ export const Route = createFileRoute("/seller/")({
 
 function SellerDashboard() {
   const session = useStore((s) => s.session);
-  const earnings = useStore((s) => s.earningsAvailable);
   const txs = useStore((s) => s.transactions);
   const active = txs.filter((t) => ["FUNDED", "SHIPPED", "DELIVERED"].includes(t.state));
   const pendingShip = txs.filter((t) => t.state === "FUNDED").length;
+  const releasedTotal = txs.filter((t) => t.state === "RELEASED").reduce((sum, t) => sum + t.amount, 0);
 
   return (
     <div className="px-5 pb-6 pt-12">
@@ -21,24 +21,24 @@ function SellerDashboard() {
           <div className="text-xs text-muted-foreground">Hello,</div>
           <div className="text-lg font-bold capitalize">{session?.name ?? "Seller"} 👋</div>
         </div>
-        <Link to="/buyer/notifications" className="flex h-11 w-11 items-center justify-center rounded-full bg-card border border-border tap-scale">
+        <Link to="/seller/orders" className="flex h-11 w-11 items-center justify-center rounded-full bg-card border border-border tap-scale">
           <Bell className="h-5 w-5" />
         </Link>
       </header>
 
-      {/* Earnings card */}
+      {/* Payout status */}
       <div className="mt-6 rounded-3xl bg-[var(--gradient-primary)] p-5 text-primary-foreground shadow-[var(--shadow-glow)] relative overflow-hidden">
         <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-secondary/30 blur-2xl" />
-        <div className="text-xs text-white/70 flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Available to withdraw</div>
-        <div className="mt-1 text-3xl font-bold tracking-tight">{formatNGN(earnings)}</div>
+        <div className="text-xs text-white/70 flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" /> Released by provider</div>
+        <div className="mt-1 text-3xl font-bold tracking-tight">{formatNGN(releasedTotal)}</div>
         <div className="mt-5 flex items-center justify-between border-t border-white/15 pt-4">
           <div className="text-xs">
             <div className="text-white/65">Active orders</div>
             <div className="text-base font-semibold">{active.length}</div>
           </div>
-          <Link to="/seller/withdraw" className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-primary tap-scale">
-            Withdraw →
-          </Link>
+          <div className="rounded-full bg-white/15 px-4 py-2 text-xs font-semibold backdrop-blur">
+            Paystack
+          </div>
         </div>
       </div>
 

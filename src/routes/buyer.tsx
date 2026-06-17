@@ -1,12 +1,17 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { Home, Compass, Receipt, Wallet, Settings } from "lucide-react";
+import { Home, Receipt, Settings } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { store } from "@/lib/mock-store";
 
 export const Route = createFileRoute("/buyer")({
-  beforeLoad: () => {
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+    if (!store.get().session) {
+      await store.bootstrap();
+    }
     const s = store.get().session;
     if (!s) throw redirect({ to: "/role-select" });
+    if (s.role === "admin") throw redirect({ to: "/admin" });
     if (s.role !== "buyer") throw redirect({ to: "/seller" });
   },
   component: BuyerShell,
@@ -21,9 +26,7 @@ function BuyerShell() {
       <BottomNav
         items={[
           { to: "/buyer", label: "Home", icon: Home },
-          { to: "/buyer/discover", label: "Discover", icon: Compass },
           { to: "/buyer/transactions", label: "Activity", icon: Receipt },
-          { to: "/buyer/wallet", label: "Wallet", icon: Wallet },
           { to: "/buyer/settings", label: "Settings", icon: Settings },
         ]}
       />

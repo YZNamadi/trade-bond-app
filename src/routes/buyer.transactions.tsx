@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useState } from "react";
 import { formatNGN, timeAgo, useStore, type TxState } from "@/lib/mock-store";
 import { TxStatusBadge } from "@/components/TxStatusBadge";
@@ -10,14 +10,18 @@ export const Route = createFileRoute("/buyer/transactions")({
 const TABS: { label: string; states: TxState[] | null }[] = [
   { label: "All", states: null },
   { label: "Active", states: ["CREATED", "FUNDED", "SHIPPED", "DELIVERED"] },
-  { label: "Completed", states: ["RELEASED"] },
-  { label: "Issues", states: ["DISPUTED", "REFUNDED"] },
+  { label: "Completed", states: ["RELEASE_PENDING", "RELEASED"] },
+  { label: "Issues", states: ["DISPUTED", "REFUND_PENDING", "REFUNDED"] },
 ];
 
 function TxList() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isIndex = pathname === "/buyer/transactions" || pathname === "/buyer/transactions/";
   const txs = useStore((s) => s.transactions);
   const [tab, setTab] = useState(0);
-  const filtered = TABS[tab].states ? txs.filter((t) => TABS[tab].states!.includes(t.state)) : txs;
+  const filtered = isIndex ? (TABS[tab].states ? txs.filter((t) => TABS[tab].states!.includes(t.state)) : txs) : [];
+
+  if (!isIndex) return <Outlet />;
 
   return (
     <div className="px-5 pb-6 pt-12">

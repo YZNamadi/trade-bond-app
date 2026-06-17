@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Bell, Plus, ShieldCheck, TrendingUp } from "lucide-react";
+import { ArrowRight, Bell, Plus, ShieldCheck } from "lucide-react";
 import { formatNGN, timeAgo, useStore } from "@/lib/mock-store";
 import { TxStatusBadge } from "@/components/TxStatusBadge";
 
@@ -9,12 +9,13 @@ export const Route = createFileRoute("/buyer/")({
 
 function BuyerHome() {
   const session = useStore((s) => s.session);
-  const wallet = useStore((s) => s.walletBalance);
-  const escrow = useStore((s) => s.escrowLocked);
   const txs = useStore((s) => s.transactions);
   const active = txs.filter((t) => ["CREATED", "FUNDED", "SHIPPED", "DELIVERED"].includes(t.state));
   const recent = txs.slice(0, 4);
   const unread = useStore((s) => s.notifications.filter((n) => !n.read).length);
+  const escrowTotal = txs
+    .filter((t) => ["FUNDED", "SHIPPED", "DELIVERED"].includes(t.state))
+    .reduce((sum, t) => sum + t.amount, 0);
 
   return (
     <div className="px-5 pb-6 pt-12">
@@ -29,29 +30,29 @@ function BuyerHome() {
         </Link>
       </header>
 
-      {/* Wallet preview */}
+      {/* Escrow preview */}
       <div className="mt-6 overflow-hidden rounded-3xl bg-[var(--gradient-primary)] p-5 text-primary-foreground shadow-[var(--shadow-glow)] relative">
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-12 -left-12 h-40 w-40 rounded-full bg-secondary/30 blur-3xl" />
         <div className="relative flex items-start justify-between">
           <div>
             <div className="flex items-center gap-1.5 text-xs text-white/75">
-              <ShieldCheck className="h-3.5 w-3.5" /> Wallet balance
+              <ShieldCheck className="h-3.5 w-3.5" /> Escrow status
             </div>
-            <div className="mt-1 text-3xl font-bold tracking-tight">{formatNGN(wallet)}</div>
+            <div className="mt-1 text-3xl font-bold tracking-tight">{formatNGN(escrowTotal)}</div>
           </div>
-          <Link to="/buyer/wallet" className="rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold backdrop-blur tap-scale">
-            View →
-          </Link>
+          <div className="rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold backdrop-blur">
+            Paystack
+          </div>
         </div>
         <div className="mt-5 flex items-center justify-between border-t border-white/15 pt-4 text-xs">
           <div>
-            <div className="text-white/65">In escrow</div>
-            <div className="font-semibold">{formatNGN(escrow)}</div>
+            <div className="text-white/65">Funds held by provider</div>
+            <div className="font-semibold">{formatNGN(escrowTotal)}</div>
           </div>
           <div className="text-right">
-            <div className="text-white/65">This month</div>
-            <div className="font-semibold flex items-center gap-1"><TrendingUp className="h-3 w-3" /> +12.4%</div>
+            <div className="text-white/65">Active</div>
+            <div className="font-semibold">{active.length}</div>
           </div>
         </div>
       </div>
@@ -59,6 +60,7 @@ function BuyerHome() {
       {/* Quick action */}
       <Link
         to="/buyer/start"
+        search={{ sellerId: "" }}
         className="mt-4 flex items-center gap-3 rounded-2xl bg-card border border-border p-4 tap-scale hover:border-primary/40 transition-colors"
       >
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent text-primary">
@@ -112,7 +114,7 @@ function BuyerHome() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">{tx.title}</div>
-                <div className="text-xs text-muted-foreground">{timeAgo(tx.updatedAt)} · {tx.reference}</div>
+                <div className="text-xs text-muted-foreground">{timeAgo(tx.updatedAt)}</div>
               </div>
               <div className="text-right">
                 <div className="text-sm font-bold">{formatNGN(tx.amount)}</div>

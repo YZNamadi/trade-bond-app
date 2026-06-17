@@ -1,33 +1,36 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, Check, ShieldCheck, BadgeCheck } from "lucide-react";
-import { formatNGN, store, useStore } from "@/lib/mock-store";
+import { ArrowLeft, ArrowRight, ShieldCheck } from "lucide-react";
+import { formatNGN, store } from "@/lib/mock-store";
 import { toast } from "sonner";
+import { PaymentDialog } from "@/components/PaymentDialog";
 
-export const Route = createFileRoute("/buyer/start")({
-  validateSearch: (s: Record<string, unknown>) => ({ sellerId: (s.sellerId as string) || "" }),
-  component: StartTx,
-});
+export const Route = createFileRoute("/buyer/start")({ component: StartTx });
 
-const STEPS = ["Select seller", "Details", "Review", "Pay"];
+const STEPS = ["Enter TrustyTag", "Details", "Review", "Pay"];
 
 function StartTx() {
   const navigate = useNavigate();
-  const sellers = useStore((s) => s.sellers);
-  const search = Route.useSearch();
-  const [step, setStep] = useState(search.sellerId ? 1 : 0);
-  const [sellerId, setSellerId] = useState(search.sellerId);
+  const [step, setStep] = useState(0);
+  const [trustyTag, setTrustyTag] = useState("");
+  const [sellerId, setSellerId] = useState("");
+  const [sellerName, setSellerName] = useState("");
+  const [sellerHandle, setSellerHandle] = useState("");
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const [amount, setAmount] = useState("");
   const [paying, setPaying] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [paymentRef, setPaymentRef] = useState<string | null>(null);
+  const [paymentTxId, setPaymentTxId] = useState<string | null>(null);
 
-  const seller = sellers.find((s) => s.id === sellerId);
+  const seller = sellerId ? { id: sellerId, name: sellerName, handle: sellerHandle, category: "General" } : null;
   const amt = Number(amount.replace(/[^\d]/g, "")) || 0;
   const fee = Math.round(amt * 0.015);
 
   const next = () => {
-    if (step === 0 && !sellerId) return toast.error("Pick a seller");
+    if (step === 0 && !sellerId) return toast.error("Enter a valid TrustyTag");
     if (step === 1) {
       if (!title.trim()) return toast.error("Add an item title");
       if (amt < 1000) return toast.error("Amount must be at least ₦1,000");
@@ -36,14 +39,20 @@ function StartTx() {
   };
   const back = () => step === 0 ? navigate({ to: "/buyer" }) : setStep((s) => s - 1);
 
-  const pay = () => {
+  const pay = async () => {
     setPaying(true);
-    setTimeout(() => {
-      const tx = store.createTx({ sellerId, title, description: desc, amount: amt, category: seller?.category || "General" });
-      store.fundEscrow(tx.id);
-      toast.success("Payment successful");
-      navigate({ to: "/buyer/transactions/$id", params: { id: tx.id } });
-    }, 1600);
+    try {
+      const tx = await store.createTx({ sellerId, title, description: desc, amount: amt, category: seller?.category || "General" });
+      const init = await store.initializeEscrowFunding(tx.id);
+      setPaymentTxId(tx.id);
+      setPaymentUrl(init.authorization_url);
+      setPaymentRef(init.reference);
+      setPaymentOpen(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Payment failed");
+    } finally {
+      setPaying(false);
+    }
   };
 
   return (
@@ -68,19 +77,40 @@ function StartTx() {
       <div className="flex-1 px-5 pt-6 animate-[slide-in-right_0.3s_ease-out]" key={step}>
         {step === 0 && (
           <div>
-            <h2 className="text-xl font-bold">Who are you paying?</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Pick from your saved or trending sellers.</p>
-            <div className="mt-5 space-y-2">
-              {sellers.map((s) => (
-                <button key={s.id} onClick={() => setSellerId(s.id)} className={`flex w-full items-center gap-3 rounded-2xl border-2 p-3 text-left tap-scale transition-all ${sellerId === s.id ? "border-primary bg-accent" : "border-border bg-card"}`}>
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--gradient-accent)] text-sm font-bold text-primary-foreground">{s.avatar}</div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{s.name}</span>{s.verified && <BadgeCheck className="h-3.5 w-3.5 text-primary" />}</div>
-                    <div className="text-xs text-muted-foreground">{s.category}</div>
-                  </div>
-                  {sellerId === s.id && <Check className="h-5 w-5 text-primary" />}
-                </button>
-              ))}
+            <h2 className="text-xl font-bold">Enter seller TrustyTag</h2>
+            <p className="mt-1 text-sm text-muted-foreground">You’ll get the seller’s TrustyTag outside the app. We’ll check it here.</p>
+            <div className="mt-5 space-y-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">TrustyTag</label>
+                <div className="rounded-2xl border border-border bg-card focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                  <input
+                    value={trustyTag}
+                    onChange={(e) => setTrustyTag(e.target.value)}
+                    placeholder="@techhaven.ng"
+                    className="h-14 w-full bg-transparent px-4 text-base outline-none placeholder:text-muted-foreground/60"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    const s = await store.lookupSellerByTrustyTag(trustyTag);
+                    setSellerId(s.id);
+                    setSellerName(s.name);
+                    setSellerHandle(s.trustyTag || s.handle);
+                    toast.success("Seller found");
+                    setStep(1);
+                  } catch (e: any) {
+                    setSellerId("");
+                    setSellerName("");
+                    setSellerHandle("");
+                    toast.error(e?.message || "Seller not found");
+                  }
+                }}
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary font-semibold text-primary-foreground tap-scale shadow-[var(--shadow-glow)]"
+              >
+                Validate TrustyTag <ArrowRight className="h-4 w-4" />
+              </button>
             </div>
           </div>
         )}
@@ -88,7 +118,7 @@ function StartTx() {
         {step === 1 && seller && (
           <div className="space-y-4">
             <div className="rounded-2xl bg-accent p-3 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-sm">{seller.avatar}</div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-sm">{sellerName ? sellerName.slice(0, 2).toUpperCase() : "S"}</div>
               <div className="text-sm">
                 <div className="font-semibold">{seller.name}</div>
                 <div className="text-xs text-muted-foreground">{seller.handle}</div>
@@ -147,23 +177,50 @@ function StartTx() {
                   <ShieldCheck className="h-10 w-10 text-primary" />
                 </div>
                 <div className="mt-6 text-lg font-bold">Ready to pay {formatNGN(amt + fee)}</div>
-                <div className="text-sm text-muted-foreground">You'll be redirected to Paystack to complete payment.</div>
+                <div className="text-sm text-muted-foreground">Complete payment in a secure in-app Paystack checkout.</div>
               </>
             )}
           </div>
         )}
       </div>
 
-      {!paying && (
+      {!paying && step !== 0 && (
         <div className="border-t border-border bg-card/80 px-5 py-4 backdrop-blur-xl">
           <button
             onClick={step === 3 ? pay : next}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary font-semibold text-primary-foreground tap-scale shadow-[var(--shadow-glow)]"
           >
-            {step === 3 ? "Pay now" : step === 2 ? "Confirm & continue" : "Continue"} <ArrowRight className="h-4 w-4" />
+            {step === 3 ? "Open secure checkout" : step === 2 ? "Confirm & continue" : "Continue"} <ArrowRight className="h-4 w-4" />
           </button>
         </div>
       )}
+
+      <PaymentDialog
+        open={paymentOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setPaymentOpen(false);
+            return;
+          }
+          setPaymentOpen(true);
+        }}
+        authorizationUrl={paymentUrl}
+        amountLabel={formatNGN(amt + fee)}
+        onVerify={async () => {
+          if (!paymentTxId || !paymentRef) throw new Error("Missing payment session");
+          await store.verifyEscrowFunding(paymentTxId, paymentRef);
+        }}
+        pollPaid={async () => {
+          if (!paymentTxId) return false;
+          const latest = await store.refreshTransaction(paymentTxId);
+          return Boolean(latest && latest.state !== "CREATED");
+        }}
+        onPaid={() => {
+          if (!paymentTxId) return;
+          toast.success("Payment confirmed");
+          navigate({ to: "/buyer/transactions/$id", params: { id: paymentTxId } });
+        }}
+      />
     </div>
   );
 }
