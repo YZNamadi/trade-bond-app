@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { User, UserRole } from './user.entity';
@@ -94,7 +94,7 @@ export class UsersService {
     const hasTrustyUpdate = 'trustyTag' in (updateData as any) || 'trustyTagLower' in (updateData as any);
     if (hasTrustyUpdate) {
       const existing = await this.findById(id);
-      if (!existing) throw new Error("User not found");
+      if (!existing) throw new NotFoundException('User not found');
 
       if (existing.trustyTag) {
         const nextTrustyTag = (updateData as any).trustyTag as string | undefined;
@@ -121,7 +121,7 @@ export class UsersService {
     }
     await this.usersRepository.update(id, updateData);
     const user = await this.findById(id);
-    if (!user) throw new Error("User not found");
+    if (!user) throw new NotFoundException('User not found');
     return this.toSafeUser(user) as SafeUser;
   }
 
@@ -136,7 +136,7 @@ export class UsersService {
     if ((dto as any).username !== undefined) updateData.username = this.normalizeUsername((dto as any).username);
     await this.usersRepository.update(userId, updateData);
     const user = await this.findById(userId);
-    if (!user) throw new Error('User not found');
+    if (!user) throw new NotFoundException('User not found');
     return this.toSafeUser(user) as SafeUser;
   }
 
@@ -148,7 +148,7 @@ export class UsersService {
 
   async applyForSeller(userId: string, dto: ApplySellerDto) {
     const user = await this.findById(userId);
-    if (!user) throw new Error('User not found');
+    if (!user) throw new NotFoundException('User not found');
     if (user.role === UserRole.ADMIN) {
       throw new BadRequestException('Not allowed');
     }
@@ -279,7 +279,7 @@ export class UsersService {
 
   async getMyBankAccount(userId: string) {
     const user = await this.findById(userId);
-    if (!user) throw new Error('User not found');
+    if (!user) throw new NotFoundException('User not found');
     const linked = Boolean(user.bankVerifiedAt && user.bankCode && user.bankAccountLast4);
     return {
       linked,
@@ -315,7 +315,7 @@ export class UsersService {
     ctx: { ip: string | null; userAgent: string | null },
   ) {
     const user = await this.findById(userId);
-    if (!user) throw new Error('User not found');
+    if (!user) throw new NotFoundException('User not found');
     if (user.role !== UserRole.SELLER) {
       throw new ForbiddenException('Only sellers can link bank accounts');
     }

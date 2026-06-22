@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, DeepPartial, EntityManager, Repository } from 'typeorm';
 import { createHash, createHmac, randomBytes } from 'crypto';
@@ -1464,7 +1464,7 @@ export class TransactionsService {
     const tx = await this.findOne(id, userId, viewerRole);
     const secret = process.env.RECEIPT_SIGNING_SECRET || process.env.JWT_SECRET;
     if (!secret) {
-      throw new Error('Missing signing secret');
+      throw new InternalServerErrorException('Missing signing secret');
     }
     const normalized = normalizeStatus(tx.status);
     const receiptId = `TTY_${tx.id.slice(0, 8).toUpperCase()}`;
@@ -1483,6 +1483,7 @@ export class TransactionsService {
       receiptHash,
       transactionId: tx.id,
       amount: tx.amount,
+      amountMinor: Number((tx as any).amountMinor ?? Math.round(Number(tx.amount || 0) * 100)),
       status: normalized,
       paymentReferenceMasked: masked,
       createdAt: tx.createdAt,

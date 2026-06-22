@@ -1,4 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -113,12 +120,16 @@ export class AnchorService {
             || (data as any)?.message
             || `Anchor request failed: ${res.status}`;
           if (attempt <= retries && res.status >= 500) continue;
-          throw new Error(msg);
+          throw new BadGatewayException(msg);
         }
         return data as T;
       } catch (e: any) {
+        if (e instanceof HttpException) throw e;
         if (attempt <= retries && (e?.name === 'AbortError' || e?.code === 'ECONNRESET')) continue;
-        throw e;
+        if (e?.name === 'AbortError' || e?.code === 'ECONNRESET') {
+          throw new ServiceUnavailableException('Anchor request timed out');
+        }
+        throw new BadGatewayException(String(e?.message || 'Anchor request failed'));
       } finally {
         clearTimeout(t);
       }
@@ -126,12 +137,12 @@ export class AnchorService {
   }
 
   private async getJson<T = any>(path: string) {
-    if (!this.apiKey()) throw new Error('ANCHOR_API_KEY is required');
+    if (!this.apiKey()) throw new ServiceUnavailableException('ANCHOR_API_KEY is required');
     return this.fetchJson<T>(`${this.baseUrl()}${path}`, { method: 'GET' }, { retries: 1 });
   }
 
   private async postJson<T = any>(path: string, body: Record<string, unknown>, idempotencyKey?: string) {
-    if (!this.apiKey()) throw new Error('ANCHOR_API_KEY is required');
+    if (!this.apiKey()) throw new ServiceUnavailableException('ANCHOR_API_KEY is required');
     return this.fetchJson<T>(
       `${this.baseUrl()}${path}`,
       {
@@ -202,7 +213,7 @@ export class AnchorService {
     const user = typeof userOrId === 'string'
       ? await this.usersRepository.findOne({ where: { id: userOrId } as any })
       : userOrId;
-    if (!user) throw new Error('User not found');
+    if (!user) throw new NotFoundException('User not found');
 
     const existingCustomerId = await this.findExistingCustomerId(user.id);
     if (existingCustomerId) {
@@ -227,7 +238,7 @@ export class AnchorService {
     };
     const res = await this.postJson<{ data?: AnchorResource }>('/api/v1/customers', payload, `tt_anchor_customer_${user.id}`);
     const customer = res?.data;
-    if (!customer?.id) throw new Error('Anchor customer creation failed');
+    if (!customer?.id) throw new BadGatewayException('Anchor customer creation failed');
     return { customerId: customer.id, customerType: String(customer.type || 'IndividualCustomer') as 'IndividualCustomer' };
   }
 
@@ -255,7 +266,7 @@ export class AnchorService {
     const user = typeof userOrId === 'string'
       ? await this.usersRepository.findOne({ where: { id: userOrId } as any })
       : userOrId;
-    if (!user) throw new Error('User not found');
+    if (!user) throw new NotFoundException('User not found');
 
     const existing = await this.moneyAccountsRepository.findOne({
       where: {
@@ -269,7 +280,7 @@ export class AnchorService {
 
     const customer = await this.ensureCustomer(user);
     const reserved = await this.createReservedAccount(customer.customerId, customer.customerType);
-    if (!reserved?.id) throw new Error('Anchor reserved account creation failed');
+    if (!reserved?.id) throw new BadGatewayException('Anchor reserved account creation failed');
     const bank = reserved.attributes?.bank ?? {};
     const accountNumber = String(reserved.attributes?.accountNumber || '').trim();
     const saved = this.moneyAccountsRepository.create({
@@ -319,7 +330,7 @@ export class AnchorService {
       payload,
       `tt_anchor_pwt_${transaction.id}`,
     );
-    if (!res?.data?.id) throw new Error('Anchor pay-with-transfer creation failed');
+    if (!res?.data?.id) throw new BadGatewayException('Anchor pay-with-transfer creation failed');
     return res.data;
   }
 
@@ -386,7 +397,7 @@ export class AnchorService {
       `tt_anchor_cp_${input.userId}_${input.bankCode}_${input.accountNumber}`,
     );
     const cp = res?.data;
-    if (!cp?.id) throw new Error('Anchor counterparty creation failed');
+    if (!cp?.id) throw new BadGatewayException('Anchor counterparty creation failed');
     const saved = this.moneyCounterpartiesRepository.create({
       provider: 'anchor',
       kind: 'BANK_ACCOUNT',
@@ -411,12 +422,12 @@ export class AnchorService {
     });
     if (existing?.providerCounterpartyId) return existing;
     const user = await this.usersRepository.findOne({ where: { id: userId } as any });
-    if (!user) throw new Error('User not found');
+    if (!user) throw new NotFoundException('User not found');
     const accountNumber = String(user.accountNumber || '').replace(/[^\d]/g, '');
     const bankCode = String(user.bankCode || '').trim();
     const accountName = String(user.accountName || user.fullName || '').trim();
     if (!accountNumber || !bankCode || !accountName) {
-      throw new Error('Missing bank account details');
+      throw new BadRequestException('Missing bank account details');
     }
     const customer = await this.ensureCustomer(user);
     return this.createCounterparty({
@@ -436,7 +447,7 @@ export class AnchorService {
     counterpartyId: string;
   }) {
     const sourceAccountId = this.payoutSourceAccountId();
-    if (!sourceAccountId) throw new Error('ANCHOR_PAYOUT_ACCOUNT_ID is required');
+    if (!sourceAccountId) throw new ServiceUnavailableException('ANCHOR_PAYOUT_ACCOUNT_ID is required');
     const payload = {
       data: {
         type: 'NIPTransfer',

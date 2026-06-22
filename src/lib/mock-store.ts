@@ -33,6 +33,7 @@ export interface Transaction {
   title: string;
   description: string;
   amount: number;
+  amountMinor: number;
   buyerName: string;
   sellerId: string;
   sellerName: string;
@@ -94,6 +95,7 @@ type ApiTransactionStatusV2 =
 type ApiTransaction = {
   id: string;
   amount: number | string;
+  amountMinor?: number | string | null;
   description: string;
   status: ApiTransactionStatus | ApiTransactionStatusV2;
   paymentReference?: string | null;
@@ -156,6 +158,7 @@ type ApiReceipt = {
   receiptHash: string;
   transactionId: string;
   amount: number | string;
+  amountMinor?: number | string | null;
   status: ApiTransactionStatus;
   paymentReferenceMasked: string | null;
   createdAt: string | number;
@@ -530,18 +533,34 @@ function mapTxState(t: ApiTransaction): TxState {
   return t.status;
 }
 
+function normalizeMajorAmount(amount: number | string | null | undefined) {
+  const parsed = typeof amount === "string" ? Number(amount) : Number(amount ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeMinorAmount(
+  amountMinor: number | string | null | undefined,
+  amount: number | string | null | undefined,
+) {
+  const parsedMinor = typeof amountMinor === "string" ? Number(amountMinor) : Number(amountMinor ?? NaN);
+  if (Number.isFinite(parsedMinor)) return parsedMinor;
+  return Math.round(normalizeMajorAmount(amount) * 100);
+}
+
 function toClientTx(t: ApiTransaction): Transaction {
   const { title, description } = parseTitleAndDescription(t.description);
   const createdAt = typeof t.createdAt === "string" ? Date.parse(t.createdAt) : Number(t.createdAt);
   const updatedAtRaw = t.updatedAt ?? t.createdAt;
   const updatedAt = typeof updatedAtRaw === "string" ? Date.parse(updatedAtRaw) : Number(updatedAtRaw);
-  const amount = typeof t.amount === "string" ? Number(t.amount) : t.amount;
+  const amount = normalizeMajorAmount(t.amount);
+  const amountMinor = normalizeMinorAmount(t.amountMinor, t.amount);
   return {
     id: t.id,
     reference: t.paymentReference || `TT-${t.id.slice(0, 8).toUpperCase()}`,
     title,
     description,
     amount: Number.isFinite(amount) ? amount : 0,
+    amountMinor,
     buyerName: t.buyer?.fullName || t.buyer?.email || "Buyer",
     sellerId: t.sellerId,
     sellerName: t.seller?.fullName || t.seller?.username || t.seller?.email || "Seller",
@@ -567,8 +586,9 @@ function sanitizeTx(v: unknown): Transaction | null {
   const state = (allowed as string[]).includes(stateVal ?? "") ? (stateVal as TxState) : null;
   if (!state) return null;
   const amountRaw = (v as any).amount;
-  const amountNum = typeof amountRaw === "number" ? amountRaw : typeof amountRaw === "string" ? Number(amountRaw) : 0;
+  const amountNum = normalizeMajorAmount(amountRaw);
   const amount = Number.isFinite(amountNum) ? amountNum : 0;
+  const amountMinor = normalizeMinorAmount((v as any).amountMinor, amountRaw);
   const createdAtRaw = (v as any).createdAt;
   const updatedAtRaw = (v as any).updatedAt;
   const createdAt = Number.isFinite(Number(createdAtRaw)) ? Number(createdAtRaw) : Date.now();
@@ -588,6 +608,7 @@ function sanitizeTx(v: unknown): Transaction | null {
     title,
     description,
     amount,
+    amountMinor,
     buyerName,
     sellerId,
     sellerName,
@@ -852,7 +873,8 @@ export const store = {
     const receipt = await apiRequest<ApiReceipt>(`/transactions/${id}/receipt`);
     return {
       ...receipt,
-      amount: typeof receipt.amount === "string" ? Number(receipt.amount) : receipt.amount,
+      amount: normalizeMajorAmount(receipt.amount),
+      amountMinor: normalizeMinorAmount(receipt.amountMinor, receipt.amount),
       createdAt: typeof receipt.createdAt === "string" ? Date.parse(receipt.createdAt) : Number(receipt.createdAt),
       updatedAt: typeof (receipt.updatedAt ?? receipt.createdAt) === "string"
         ? Date.parse(receipt.updatedAt as any)

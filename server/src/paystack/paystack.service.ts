@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadGatewayException,
+  HttpException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 
@@ -30,14 +35,18 @@ export class PaystackService {
           if (attempt <= retries && res.status >= 500) {
             continue;
           }
-          throw new Error(msg);
+          throw new BadGatewayException(msg);
         }
         return data;
       } catch (e: any) {
+        if (e instanceof HttpException) throw e;
         if (attempt <= retries && (e?.name === 'AbortError' || e?.code === 'ECONNRESET')) {
           continue;
         }
-        throw e;
+        if (e?.name === 'AbortError' || e?.code === 'ECONNRESET') {
+          throw new ServiceUnavailableException('Paystack request timed out');
+        }
+        throw new BadGatewayException(String(e?.message || 'Paystack request failed'));
       } finally {
         clearTimeout(t);
       }
@@ -47,7 +56,7 @@ export class PaystackService {
   async initializeTransaction(email: string, amount: number, reference: string) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
 
     const data = await this.fetchJson(
@@ -72,7 +81,7 @@ export class PaystackService {
   async verifyTransaction(reference: string) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
 
     return this.fetchJson(
@@ -90,7 +99,7 @@ export class PaystackService {
   async listBanks(currency: 'NGN' | string = 'NGN') {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     const res = await this.fetchJson(
       `https://api.paystack.co/bank?currency=${encodeURIComponent(currency)}`,
@@ -108,7 +117,7 @@ export class PaystackService {
   async resolveAccountNumber(accountNumber: string, bankCode: string) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     const res = await this.fetchJson(
       `https://api.paystack.co/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
@@ -126,7 +135,7 @@ export class PaystackService {
   async createTransferRecipient(input: { name: string; accountNumber: string; bankCode: string; currency?: 'NGN' | string; idempotencyKey?: string }) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     const currency = input.currency || 'NGN';
     const res = await this.fetchJson(
@@ -161,7 +170,7 @@ export class PaystackService {
   }) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     const res = await this.fetchJson(
       'https://api.paystack.co/transfer',
@@ -189,7 +198,7 @@ export class PaystackService {
   async verifyTransfer(reference: string) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     return this.fetchJson(
       `https://api.paystack.co/transfer/verify/${encodeURIComponent(reference)}`,
@@ -206,7 +215,7 @@ export class PaystackService {
   async refundTransaction(input: { transaction: string; amountInKobo?: number; idempotencyKey?: string }) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     const res = await this.fetchJson(
       'https://api.paystack.co/refund',
@@ -230,7 +239,7 @@ export class PaystackService {
   async fetchRefund(id: string | number) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     const rid = String(id).trim();
     return this.fetchJson(
@@ -248,7 +257,7 @@ export class PaystackService {
   async listRefunds(params?: { transaction?: string; currency?: string; page?: number; perPage?: number }) {
     const secret = this.secretKey();
     if (!secret) {
-      throw new Error('PAYSTACK_SECRET_KEY is required');
+      throw new ServiceUnavailableException('PAYSTACK_SECRET_KEY is required');
     }
     const q = new URLSearchParams();
     if (params?.transaction) q.set('transaction', String(params.transaction));

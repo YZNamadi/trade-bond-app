@@ -21,6 +21,7 @@ import { OutboxAndLedger0004 } from './migrations/0004-outbox-and-ledger';
 import { TransactionMessages0005 } from './migrations/0005-transaction-messages';
 import { IntegrityAndIdentity0006 } from './migrations/0006-integrity-and-identity';
 import { AnchorMoneyFoundation0007 } from './migrations/0007-anchor-money-foundation';
+import { TransactionAmountMinorUnits0008 } from './migrations/0008-transaction-amount-minor-units';
 import { MoneyAccount } from '../money/money-account.entity';
 import { MoneyCounterparty } from '../money/money-counterparty.entity';
 import { MoneyMovement } from '../money/money-movement.entity';
@@ -65,7 +66,7 @@ export const AppDataSource = new DataSource(
         database: process.env.DB_NAME || 'trustytrade',
         ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
         entities,
-        migrations: [Init0001, BankAndPayout0002, Disputes0003, OutboxAndLedger0004, TransactionMessages0005, IntegrityAndIdentity0006, AnchorMoneyFoundation0007],
+        migrations: [Init0001, BankAndPayout0002, Disputes0003, OutboxAndLedger0004, TransactionMessages0005, IntegrityAndIdentity0006, AnchorMoneyFoundation0007, TransactionAmountMinorUnits0008],
         synchronize,
       }
     : {

@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index, VersionColumn } from 'typeorm';
+import { AfterLoad, BeforeInsert, BeforeUpdate, Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index, VersionColumn, ValueTransformer } from 'typeorm';
 import { User } from '../users/user.entity';
 
 export enum Currency {
@@ -22,13 +22,35 @@ export enum TransactionStatus {
   CANCELLED = 'cancelled',
 }
 
+const majorUnitAmountTransformer: ValueTransformer = {
+  to(value: number | null | undefined) {
+    const num = Number(value ?? 0);
+    if (!Number.isFinite(num)) return 0;
+    return Math.round(num * 100);
+  },
+  from(value: number | string | null | undefined) {
+    const num = Number(value ?? 0);
+    if (!Number.isFinite(num)) return 0;
+    return num / 100;
+  },
+};
+
+function toMinorUnits(value: number | null | undefined) {
+  const num = Number(value ?? 0);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round(num * 100);
+}
+
 @Entity('transactions')
 export class Transaction {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  // Persist monetary values as integer kobo while keeping the app-facing property in naira.
+  @Column({ type: 'integer', transformer: majorUnitAmountTransformer })
   amount: number;
+
+  amountMinor: number;
 
   @Column({
     type: 'simple-enum',
@@ -132,4 +154,11 @@ export class Transaction {
 
   @VersionColumn({ default: 1, nullable: true })
   version: number | null;
+
+  @AfterLoad()
+  @BeforeInsert()
+  @BeforeUpdate()
+  syncDerivedAmounts() {
+    this.amountMinor = toMinorUnits(this.amount);
+  }
 }
