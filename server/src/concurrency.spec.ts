@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { AppModule } from './app.module';
 import { User, UserRole } from './users/user.entity';
 import { Transaction, TransactionStatus } from './transactions/transaction.entity';
+import { configureApp } from './app.setup';
 
 function csrfFromSetCookie(setCookie: string[] | undefined) {
   const cookie = (setCookie || []).find((c) => c.startsWith('csrf_token='));
@@ -30,6 +31,7 @@ describe('concurrency safety', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    configureApp(app as any);
     await app.init();
   });
 
@@ -110,4 +112,3 @@ describe('concurrency safety', () => {
     expect(statuses).toEqual([400, 200]);
   });
 });
-

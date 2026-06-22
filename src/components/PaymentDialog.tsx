@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ShieldCheck, Check } from "lucide-react";
+import { ShieldCheck, Check, Copy, Landmark } from "lucide-react";
 import { toast } from "sonner";
 
 export function PaymentDialog({
@@ -10,6 +10,13 @@ export function PaymentDialog({
   onOpenChange,
   authorizationUrl,
   amountLabel,
+  paymentProvider,
+  collectionStrategy,
+  accountNumber,
+  accountName,
+  bankName,
+  expiresAt,
+  paymentReference,
   onVerify,
   pollPaid,
   onPaid,
@@ -18,7 +25,14 @@ export function PaymentDialog({
   onOpenChange: (open: boolean) => void;
   authorizationUrl: string | null;
   amountLabel: string;
-  onVerify: () => Promise<void>;
+  paymentProvider?: string | null;
+  collectionStrategy?: string | null;
+  accountNumber?: string | null;
+  accountName?: string | null;
+  bankName?: string | null;
+  expiresAt?: string | null;
+  paymentReference?: string | null;
+  onVerify: () => Promise<boolean>;
   pollPaid?: () => Promise<boolean>;
   onPaid?: () => void;
 }) {
@@ -29,6 +43,22 @@ export function PaymentDialog({
   const autoVerifyIntervalRef = useRef<number | null>(null);
 
   const url = useMemo(() => authorizationUrl, [authorizationUrl]);
+  const transferMode = !url && Boolean(accountNumber);
+  const expiryLabel = useMemo(() => {
+    if (!expiresAt) return null;
+    const parsed = Date.parse(expiresAt);
+    if (!Number.isFinite(parsed)) return expiresAt;
+    return new Date(parsed).toLocaleString();
+  }, [expiresAt]);
+
+  const copy = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(label);
+    } catch {
+      toast.error("Copy failed");
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -87,8 +117,9 @@ export function PaymentDialog({
         }
         setVerifying(true);
         onVerify()
-          .then(() => {
+          .then((confirmed) => {
             if (stopped) return;
+            if (!confirmed) return;
             setPaid(true);
             try {
               onPaid?.();
@@ -171,11 +202,46 @@ export function PaymentDialog({
                 .
               </div>
             </div>
+          ) : transferMode ? (
+            <div className="p-5">
+              <div className="rounded-3xl border border-border bg-background p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-primary">
+                    <Landmark className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">Transfer to fund escrow</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {paymentProvider ? `${paymentProvider.toUpperCase()} ` : ""}generated bank details for this escrow.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <TransferField label="Bank" value={bankName || "Anchor bank"} onCopy={bankName ? () => copy(bankName, "Bank copied") : undefined} />
+                  <TransferField label="Account number" value={accountNumber || "—"} onCopy={accountNumber ? () => copy(accountNumber, "Account number copied") : undefined} mono />
+                  <TransferField label="Account name" value={accountName || "TrustyTrade escrow"} onCopy={accountName ? () => copy(accountName, "Account name copied") : undefined} />
+                  {paymentReference ? (
+                    <TransferField label="Reference" value={paymentReference} onCopy={() => copy(paymentReference, "Reference copied")} mono />
+                  ) : null}
+                  {collectionStrategy ? (
+                    <TransferField label="Collection mode" value={collectionStrategy.replace(/_/g, " ")} />
+                  ) : null}
+                  {expiryLabel ? (
+                    <TransferField label="Expires" value={expiryLabel} />
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-2xl border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+                Transfer the exact amount shown above. Verification may take a few moments after the bank marks the payment as received.
+              </div>
+            </div>
           ) : (
             <div className="flex h-[520px] w-full flex-col items-center justify-center gap-2 px-6 text-center text-sm">
               <div className="font-semibold text-foreground">Checkout not available</div>
               <div className="text-muted-foreground">
-                The payment provider didn’t return a checkout URL. Please try again.
+                The payment provider didn’t return payment instructions. Please try again.
               </div>
             </div>
           )}
@@ -197,5 +263,35 @@ export function PaymentDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function TransferField({
+  label,
+  value,
+  onCopy,
+  mono,
+}: {
+  label: string;
+  value: string;
+  onCopy?: () => void;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card px-3 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</div>
+        {onCopy ? (
+          <button
+            type="button"
+            onClick={onCopy}
+            className="inline-flex h-7 items-center gap-1 rounded-xl border border-border bg-background px-2 text-[10px] font-semibold tap-scale"
+          >
+            <Copy className="h-3 w-3" /> Copy
+          </button>
+        ) : null}
+      </div>
+      <div className={`mt-1 break-all text-sm font-semibold ${mono ? "font-mono tracking-tight" : ""}`}>{value}</div>
+    </div>
   );
 }

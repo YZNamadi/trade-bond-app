@@ -100,6 +100,12 @@ export class User {
   @BeforeInsert()
   @BeforeUpdate()
   syncTrustyTag() {
+    if (this.email) {
+      this.email = String(this.email).trim().toLowerCase();
+    }
+    if (this.username) {
+      this.username = String(this.username).trim().toLowerCase();
+    }
     if (!this.trustyTag) {
       this.trustyTag = null;
       this.trustyTagLower = null;

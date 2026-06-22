@@ -7,6 +7,7 @@ import { SellerOnboardingRequest, SellerOnboardingStatus } from './seller-onboar
 import { ApplySellerDto } from './dto/apply-seller.dto';
 import { AuditService } from '../common/audit.service';
 import { PaystackService } from '../paystack/paystack.service';
+import { AnchorService } from '../anchor/anchor.service';
 
 type SafeUser = Omit<User, 'passwordHash' | 'syncTrustyTag'>;
 
@@ -19,6 +20,7 @@ export class UsersService {
     private sellerOnboardingRepository: Repository<SellerOnboardingRequest>,
     private auditService: AuditService,
     private paystackService: PaystackService,
+    private anchorService: AnchorService,
   ) {}
 
   private toSafeUser(user: User) {
@@ -37,11 +39,31 @@ export class UsersService {
     return safe;
   }
 
+  private normalizeEmail(email: string) {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  private normalizeUsername(username: string) {
+    return String(username || '').trim().toLowerCase();
+  }
+
+  private activeSettlementProvider() {
+    return this.anchorService.activeSettlementProvider() === 'anchor' ? 'anchor' : 'paystack';
+  }
+
   async create(userData: Partial<User>): Promise<User> {
     if (userData.email) {
+      userData.email = this.normalizeEmail(userData.email);
       const existingUser = await this.findByEmail(userData.email);
       if (existingUser) {
         throw new ConflictException('Email already exists');
+      }
+    }
+    if (userData.username) {
+      userData.username = this.normalizeUsername(userData.username);
+      const existingUsername = await this.findByUsername(userData.username);
+      if (existingUsername) {
+        throw new ConflictException('Username already exists');
       }
     }
     const user = this.usersRepository.create(userData);
@@ -49,11 +71,11 @@ export class UsersService {
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { email } });
+    return this.usersRepository.findOne({ where: { email: this.normalizeEmail(email) } });
   }
 
   async findByUsername(username: string): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { username } });
+    return this.usersRepository.findOne({ where: { username: this.normalizeUsername(username) } });
   }
 
   async findById(id: string): Promise<User | null> {
@@ -111,6 +133,7 @@ export class UsersService {
     const updateData: Partial<User> = {};
     if (dto.fullName !== undefined) updateData.fullName = dto.fullName.trim();
     if (dto.phone !== undefined) updateData.phone = dto.phone.trim();
+    if ((dto as any).username !== undefined) updateData.username = this.normalizeUsername((dto as any).username);
     await this.usersRepository.update(userId, updateData);
     const user = await this.findById(userId);
     if (!user) throw new Error('User not found');
@@ -257,7 +280,7 @@ export class UsersService {
   async getMyBankAccount(userId: string) {
     const user = await this.findById(userId);
     if (!user) throw new Error('User not found');
-    const linked = Boolean(user.paystackTransferRecipientCode && user.bankVerifiedAt && user.bankCode && user.bankAccountLast4);
+    const linked = Boolean(user.bankVerifiedAt && user.bankCode && user.bankAccountLast4);
     return {
       linked,
       bankName: user.bankName ? String(user.bankName) : null,
@@ -266,6 +289,24 @@ export class UsersService {
       accountNumberMasked: user.bankAccountLast4 ? `******${String(user.bankAccountLast4)}` : null,
       verifiedAt: user.bankVerifiedAt ? user.bankVerifiedAt.toISOString() : null,
     };
+  }
+
+  async listSupportedBanks() {
+    const usingAnchor = this.activeSettlementProvider() === 'anchor';
+    if (usingAnchor) {
+      const banks = await this.anchorService.listBanks();
+      return (banks || []).map((b: any) => ({
+        name: String(b?.attributes?.name || ''),
+        code: String(b?.attributes?.nipCode || ''),
+        slug: String(b?.attributes?.code || '') || null,
+      })).filter((b) => b.name && b.code);
+    }
+    const banks = await this.paystackService.listBanks('NGN');
+    return (banks || []).map((b: any) => ({
+      name: String(b?.name || ''),
+      code: String(b?.code || ''),
+      slug: b?.slug ? String(b.slug) : null,
+    })).filter((b) => b.name && b.code);
   }
 
   async updateMyBankAccount(
@@ -290,16 +331,31 @@ export class UsersService {
       throw new BadRequestException('Invalid bank code');
     }
 
-    const banks = await this.paystackService.listBanks('NGN');
-    const bank = (banks || []).find((b: any) => String(b?.code || '') === bankCode) || null;
-    if (!bank) {
-      throw new BadRequestException('Unsupported bank');
-    }
-
-    const resolved = await this.paystackService.resolveAccountNumber(accountNumber, bankCode);
-    const resolvedName = String(resolved?.account_name || '').trim();
-    if (!resolvedName) {
-      throw new BadRequestException('Account could not be verified');
+    const usingAnchor = this.activeSettlementProvider() === 'anchor';
+    let bank: any = null;
+    let resolvedName = '';
+    if (usingAnchor) {
+      const banks = await this.anchorService.listBanks();
+      bank = (banks || []).find((b: any) => String(b?.attributes?.nipCode || '') === bankCode) || null;
+      if (!bank) {
+        throw new BadRequestException('Unsupported bank');
+      }
+      const resolved = await this.anchorService.verifyAccountNumber(bankCode, accountNumber);
+      resolvedName = String(resolved?.data?.attributes?.accountName || '').trim();
+      if (!resolvedName) {
+        throw new BadRequestException('Account could not be verified');
+      }
+    } else {
+      const banks = await this.paystackService.listBanks('NGN');
+      bank = (banks || []).find((b: any) => String(b?.code || '') === bankCode) || null;
+      if (!bank) {
+        throw new BadRequestException('Unsupported bank');
+      }
+      const resolved = await this.paystackService.resolveAccountNumber(accountNumber, bankCode);
+      resolvedName = String(resolved?.account_name || '').trim();
+      if (!resolvedName) {
+        throw new BadRequestException('Account could not be verified');
+      }
     }
     const providedName = input.accountName ? String(input.accountName).trim() : '';
     if (providedName) {
@@ -310,28 +366,40 @@ export class UsersService {
       }
     }
 
-    const recipient = await this.paystackService.createTransferRecipient({
-      name: resolvedName,
-      accountNumber,
-      bankCode,
-      currency: 'NGN',
-      idempotencyKey: `tt_recipient_${userId}_${bankCode}_${accountNumber}`,
-    });
-    const recipientCode = String(recipient?.recipient_code || '').trim();
-    if (!recipientCode) {
-      throw new BadRequestException('Recipient setup failed');
-    }
-
     const last4 = accountNumber.slice(-4);
     await this.usersRepository.update(userId, {
-      bankName: String(bank?.name || ''),
+      bankName: String(bank?.name || bank?.attributes?.name || ''),
       bankCode,
       accountNumber,
       accountName: resolvedName,
       bankAccountLast4: last4,
       bankVerifiedAt: new Date(),
-      paystackTransferRecipientCode: recipientCode,
+      paystackTransferRecipientCode: usingAnchor ? null : undefined,
     } as any);
+
+    if (usingAnchor) {
+      await this.anchorService.createCounterparty({
+        userId,
+        bankCode,
+        accountNumber,
+        accountName: resolvedName,
+      });
+    } else {
+      const recipient = await this.paystackService.createTransferRecipient({
+        name: resolvedName,
+        accountNumber,
+        bankCode,
+        currency: 'NGN',
+        idempotencyKey: `tt_recipient_${userId}_${bankCode}_${accountNumber}`,
+      });
+      const recipientCode = String(recipient?.recipient_code || '').trim();
+      if (!recipientCode) {
+        throw new BadRequestException('Recipient setup failed');
+      }
+      await this.usersRepository.update(userId, {
+        paystackTransferRecipientCode: recipientCode,
+      } as any);
+    }
 
     await this.auditService.record({
       action: 'seller.bank_account.link',

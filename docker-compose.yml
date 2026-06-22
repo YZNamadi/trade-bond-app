@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trustytrade
+      POSTGRES_USER: trustytrade
+      POSTGRES_PASSWORD: trustytrade_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trustytrade -d trustytrade"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    command: ["sh", "-c", "node ./node_modules/typeorm/cli.js migration:run -d dist/database/data-source.js && node dist/main.js"]
+    restart: unless-stopped
+    env_file:
+      - ./server/.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-trustytrade_docker_dev_jwt_secret}
+      RECEIPT_SIGNING_SECRET: ${RECEIPT_SIGNING_SECRET:-trustytrade_docker_dev_receipt_secret}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-V54JX1tILYCztZbttzvdWim/FpzA+f8afQJRuMpzGTo=}
+      EVIDENCE_ENCRYPTION_KEY_BASE64: ${EVIDENCE_ENCRYPTION_KEY_BASE64:-V54JX1tILYCztZbttzvdWim/FpzA+f8afQJRuMpzGTo=}
+      DB_TYPE: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: trustytrade
+      DB_PASSWORD: trustytrade_dev_password
+      DB_NAME: trustytrade
+      DB_SSL: "false"
+      TYPEORM_SYNCHRONIZE: "false"
+      REDIS_URL: redis://redis:6379
+      ENABLE_SEED: "false"
+      ENABLE_RECONCILIATION: "true"
+      EVIDENCE_REQUIRE_VIRUS_SCAN: ${EVIDENCE_REQUIRE_VIRUS_SCAN:-false}
+      BOOTSTRAP_ADMIN: "false"
+      BOOTSTRAP_ADMIN_EMAIL: ""
+      BOOTSTRAP_ADMIN_PASSWORD: ""
+      BOOTSTRAP_ADMIN_RESET_PASSWORD: "false"
+      CORS_ORIGINS: http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+        VITE_ADMIN_API_TOKEN: ${VITE_ADMIN_API_TOKEN:-}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:

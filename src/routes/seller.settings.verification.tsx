@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, BadgeCheck, Building2, Camera, CreditCard, Mail, Phone } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CreditCard, Mail, ShieldCheck, Store } from "lucide-react";
 import { useStore } from "@/lib/mock-store";
 
 export const Route = createFileRoute("/seller/settings/verification")({
@@ -39,13 +39,12 @@ function SellerVerification() {
       </div>
 
       <section className="mt-6">
-        <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Requirements</h2>
+        <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Current checks</h2>
         <div className="overflow-hidden rounded-2xl border border-border bg-card divide-y divide-border">
-          <Item icon={<Building2 className="h-4 w-4" />} label="Government ID and CAC" status={verified ? "Complete" : "Required"} />
-          <Item icon={<Camera className="h-4 w-4" />} label="Face verification" status={verified ? "Complete" : "Required"} />
-          <Item icon={<CreditCard className="h-4 w-4" />} label="Bank verification" status={verified ? "Complete" : "Required"} />
-          <Item icon={<Phone className="h-4 w-4" />} label="Phone verification" status={verified ? "Complete" : "Required"} />
-          <Item icon={<Mail className="h-4 w-4" />} label="Email verification" status={verified ? "Complete" : "Required"} />
+          <Item icon={<Store className="h-4 w-4" />} label="Seller onboarding review" status={verified ? "Approved" : "Pending"} />
+          <Item icon={<CreditCard className="h-4 w-4" />} label="Submitted bank details" status={verified ? "Checked" : "Required"} />
+          <Item icon={<Mail className="h-4 w-4" />} label="Account email" status={verified ? "Active" : "Required"} />
+          <Item icon={<ShieldCheck className="h-4 w-4" />} label="TrustyTag activation" status={verified ? "Active" : "Pending"} />
         </div>
       </section>
     </div>
@@ -61,4 +60,3 @@ function Item({ icon, label, status }: { icon: React.ReactNode; label: string; s
     </div>
   );
 }
-

@@ -19,6 +19,13 @@ import { BankAndPayout0002 } from './migrations/0002-bank-and-payout';
 import { Disputes0003 } from './migrations/0003-disputes';
 import { OutboxAndLedger0004 } from './migrations/0004-outbox-and-ledger';
 import { TransactionMessages0005 } from './migrations/0005-transaction-messages';
+import { IntegrityAndIdentity0006 } from './migrations/0006-integrity-and-identity';
+import { AnchorMoneyFoundation0007 } from './migrations/0007-anchor-money-foundation';
+import { MoneyAccount } from '../money/money-account.entity';
+import { MoneyCounterparty } from '../money/money-counterparty.entity';
+import { MoneyMovement } from '../money/money-movement.entity';
+import { ProviderEvent } from '../money/provider-event.entity';
+import { ReconciliationRun } from '../money/reconciliation-run.entity';
 
 const type = (process.env.DB_TYPE || 'sqlite').toLowerCase();
 const isProd = process.env.NODE_ENV === 'production';
@@ -40,6 +47,11 @@ const entities = [
   OutboxJob,
   LedgerEntry,
   PaystackWebhookEvent,
+  MoneyAccount,
+  MoneyCounterparty,
+  MoneyMovement,
+  ProviderEvent,
+  ReconciliationRun,
 ];
 
 export const AppDataSource = new DataSource(
@@ -53,7 +65,7 @@ export const AppDataSource = new DataSource(
         database: process.env.DB_NAME || 'trustytrade',
         ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
         entities,
-        migrations: [Init0001, BankAndPayout0002, Disputes0003, OutboxAndLedger0004, TransactionMessages0005],
+        migrations: [Init0001, BankAndPayout0002, Disputes0003, OutboxAndLedger0004, TransactionMessages0005, IntegrityAndIdentity0006, AnchorMoneyFoundation0007],
         synchronize,
       }
     : {

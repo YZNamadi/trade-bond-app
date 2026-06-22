@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { AuditLog } from './audit-log.entity';
 import { getRequestContext } from '../observability/request-context';
 
@@ -23,9 +23,10 @@ export class AuditService {
     before?: Record<string, unknown> | null;
     after?: Record<string, unknown> | null;
     outcome?: string | null;
-  }) {
+  }, manager?: EntityManager | null) {
     const ctx = getRequestContext();
-    const log = this.auditRepository.create({
+    const repo = manager ? manager.getRepository(AuditLog) : this.auditRepository;
+    const log = repo.create({
       requestId: input.requestId ?? ctx?.requestId ?? null,
       action: input.action,
       actorUserId: input.actorUserId ?? null,
@@ -38,6 +39,6 @@ export class AuditService {
       after: input.after ?? null,
       outcome: input.outcome ?? null,
     });
-    await this.auditRepository.save(log);
+    await repo.save(log);
   }
 }

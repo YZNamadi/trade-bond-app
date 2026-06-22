@@ -29,6 +29,7 @@ import { Route as BuyerSettingsRouteImport } from './routes/buyer.settings'
 import { Route as BuyerNotificationsRouteImport } from './routes/buyer.notifications'
 import { Route as AdminTransactionsRouteImport } from './routes/admin.transactions'
 import { Route as AdminSellerOnboardingRouteImport } from './routes/admin.seller-onboarding'
+import { Route as AdminReconciliationRouteImport } from './routes/admin.reconciliation'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminDisputesRouteImport } from './routes/admin.disputes'
 import { Route as SellerSettingsVerificationRouteImport } from './routes/seller.settings.verification'
@@ -42,6 +43,7 @@ import { Route as BuyerTransactionsIdRouteImport } from './routes/buyer.transact
 import { Route as BuyerSettingsSupportRouteImport } from './routes/buyer.settings.support'
 import { Route as BuyerSettingsSecurityRouteImport } from './routes/buyer.settings.security'
 import { Route as BuyerSettingsNotificationsRouteImport } from './routes/buyer.settings.notifications'
+import { Route as BuyerSettingsBankAccountsRouteImport } from './routes/buyer.settings.bank-accounts'
 import { Route as BuyerSellerIdRouteImport } from './routes/buyer.seller.$id'
 import { Route as BuyerDisputesIdRouteImport } from './routes/buyer.disputes.$id'
 import { Route as BuyerChatIdRouteImport } from './routes/buyer.chat.$id'
@@ -150,6 +152,11 @@ const AdminSellerOnboardingRoute = AdminSellerOnboardingRouteImport.update({
   path: '/seller-onboarding',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminReconciliationRoute = AdminReconciliationRouteImport.update({
+  id: '/reconciliation',
+  path: '/reconciliation',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -219,6 +226,12 @@ const BuyerSettingsNotificationsRoute =
     path: '/notifications',
     getParentRoute: () => BuyerSettingsRoute,
   } as any)
+const BuyerSettingsBankAccountsRoute =
+  BuyerSettingsBankAccountsRouteImport.update({
+    id: '/bank-accounts',
+    path: '/bank-accounts',
+    getParentRoute: () => BuyerSettingsRoute,
+  } as any)
 const BuyerSellerIdRoute = BuyerSellerIdRouteImport.update({
   id: '/seller/$id',
   path: '/seller/$id',
@@ -266,6 +279,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/admin/disputes': typeof AdminDisputesRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
   '/admin/seller-onboarding': typeof AdminSellerOnboardingRoute
   '/admin/transactions': typeof AdminTransactionsRouteWithChildren
   '/buyer/notifications': typeof BuyerNotificationsRoute
@@ -283,6 +297,7 @@ export interface FileRoutesByFullPath {
   '/buyer/chat/$id': typeof BuyerChatIdRoute
   '/buyer/disputes/$id': typeof BuyerDisputesIdRoute
   '/buyer/seller/$id': typeof BuyerSellerIdRoute
+  '/buyer/settings/bank-accounts': typeof BuyerSettingsBankAccountsRoute
   '/buyer/settings/notifications': typeof BuyerSettingsNotificationsRoute
   '/buyer/settings/security': typeof BuyerSettingsSecurityRoute
   '/buyer/settings/support': typeof BuyerSettingsSupportRoute
@@ -305,6 +320,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/admin/disputes': typeof AdminDisputesRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
   '/admin/seller-onboarding': typeof AdminSellerOnboardingRoute
   '/admin/transactions': typeof AdminTransactionsRouteWithChildren
   '/buyer/notifications': typeof BuyerNotificationsRoute
@@ -322,6 +338,7 @@ export interface FileRoutesByTo {
   '/buyer/chat/$id': typeof BuyerChatIdRoute
   '/buyer/disputes/$id': typeof BuyerDisputesIdRoute
   '/buyer/seller/$id': typeof BuyerSellerIdRoute
+  '/buyer/settings/bank-accounts': typeof BuyerSettingsBankAccountsRoute
   '/buyer/settings/notifications': typeof BuyerSettingsNotificationsRoute
   '/buyer/settings/security': typeof BuyerSettingsSecurityRoute
   '/buyer/settings/support': typeof BuyerSettingsSupportRoute
@@ -348,6 +365,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/admin/disputes': typeof AdminDisputesRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
   '/admin/seller-onboarding': typeof AdminSellerOnboardingRoute
   '/admin/transactions': typeof AdminTransactionsRouteWithChildren
   '/buyer/notifications': typeof BuyerNotificationsRoute
@@ -365,6 +383,7 @@ export interface FileRoutesById {
   '/buyer/chat/$id': typeof BuyerChatIdRoute
   '/buyer/disputes/$id': typeof BuyerDisputesIdRoute
   '/buyer/seller/$id': typeof BuyerSellerIdRoute
+  '/buyer/settings/bank-accounts': typeof BuyerSettingsBankAccountsRoute
   '/buyer/settings/notifications': typeof BuyerSettingsNotificationsRoute
   '/buyer/settings/security': typeof BuyerSettingsSecurityRoute
   '/buyer/settings/support': typeof BuyerSettingsSupportRoute
@@ -392,6 +411,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin/disputes'
     | '/admin/login'
+    | '/admin/reconciliation'
     | '/admin/seller-onboarding'
     | '/admin/transactions'
     | '/buyer/notifications'
@@ -409,6 +429,7 @@ export interface FileRouteTypes {
     | '/buyer/chat/$id'
     | '/buyer/disputes/$id'
     | '/buyer/seller/$id'
+    | '/buyer/settings/bank-accounts'
     | '/buyer/settings/notifications'
     | '/buyer/settings/security'
     | '/buyer/settings/support'
@@ -431,6 +452,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin/disputes'
     | '/admin/login'
+    | '/admin/reconciliation'
     | '/admin/seller-onboarding'
     | '/admin/transactions'
     | '/buyer/notifications'
@@ -448,6 +470,7 @@ export interface FileRouteTypes {
     | '/buyer/chat/$id'
     | '/buyer/disputes/$id'
     | '/buyer/seller/$id'
+    | '/buyer/settings/bank-accounts'
     | '/buyer/settings/notifications'
     | '/buyer/settings/security'
     | '/buyer/settings/support'
@@ -473,6 +496,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin/disputes'
     | '/admin/login'
+    | '/admin/reconciliation'
     | '/admin/seller-onboarding'
     | '/admin/transactions'
     | '/buyer/notifications'
@@ -490,6 +514,7 @@ export interface FileRouteTypes {
     | '/buyer/chat/$id'
     | '/buyer/disputes/$id'
     | '/buyer/seller/$id'
+    | '/buyer/settings/bank-accounts'
     | '/buyer/settings/notifications'
     | '/buyer/settings/security'
     | '/buyer/settings/support'
@@ -658,6 +683,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSellerOnboardingRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/reconciliation': {
+      id: '/admin/reconciliation'
+      path: '/reconciliation'
+      fullPath: '/admin/reconciliation'
+      preLoaderRoute: typeof AdminReconciliationRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/login': {
       id: '/admin/login'
       path: '/login'
@@ -749,6 +781,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BuyerSettingsNotificationsRouteImport
       parentRoute: typeof BuyerSettingsRoute
     }
+    '/buyer/settings/bank-accounts': {
+      id: '/buyer/settings/bank-accounts'
+      path: '/bank-accounts'
+      fullPath: '/buyer/settings/bank-accounts'
+      preLoaderRoute: typeof BuyerSettingsBankAccountsRouteImport
+      parentRoute: typeof BuyerSettingsRoute
+    }
     '/buyer/seller/$id': {
       id: '/buyer/seller/$id'
       path: '/seller/$id'
@@ -827,6 +866,7 @@ const AdminTransactionsRouteWithChildren =
 interface AdminRouteChildren {
   AdminDisputesRoute: typeof AdminDisputesRouteWithChildren
   AdminLoginRoute: typeof AdminLoginRoute
+  AdminReconciliationRoute: typeof AdminReconciliationRoute
   AdminSellerOnboardingRoute: typeof AdminSellerOnboardingRoute
   AdminTransactionsRoute: typeof AdminTransactionsRouteWithChildren
   AdminIndexRoute: typeof AdminIndexRoute
@@ -835,6 +875,7 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminDisputesRoute: AdminDisputesRouteWithChildren,
   AdminLoginRoute: AdminLoginRoute,
+  AdminReconciliationRoute: AdminReconciliationRoute,
   AdminSellerOnboardingRoute: AdminSellerOnboardingRoute,
   AdminTransactionsRoute: AdminTransactionsRouteWithChildren,
   AdminIndexRoute: AdminIndexRoute,
@@ -843,12 +884,14 @@ const AdminRouteChildren: AdminRouteChildren = {
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface BuyerSettingsRouteChildren {
+  BuyerSettingsBankAccountsRoute: typeof BuyerSettingsBankAccountsRoute
   BuyerSettingsNotificationsRoute: typeof BuyerSettingsNotificationsRoute
   BuyerSettingsSecurityRoute: typeof BuyerSettingsSecurityRoute
   BuyerSettingsSupportRoute: typeof BuyerSettingsSupportRoute
 }
 
 const BuyerSettingsRouteChildren: BuyerSettingsRouteChildren = {
+  BuyerSettingsBankAccountsRoute: BuyerSettingsBankAccountsRoute,
   BuyerSettingsNotificationsRoute: BuyerSettingsNotificationsRoute,
   BuyerSettingsSecurityRoute: BuyerSettingsSecurityRoute,
   BuyerSettingsSupportRoute: BuyerSettingsSupportRoute,

@@ -21,14 +21,14 @@ function RoleSelect() {
       <div className="mt-10 animate-[fade-in_0.4s_ease-out]">
         <h1 className="text-3xl font-bold leading-tight tracking-tight">Choose an account</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Buyer and Seller accounts are separate identities. Switch accounts securely.
+          Switch between active accounts in this browser session.
         </p>
       </div>
 
       <div className="mt-8 space-y-3">
         {accounts.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
-            No accounts saved on this device yet.
+            No accounts are active in this browser session yet.
           </div>
         ) : (
           accounts.map((a) => (

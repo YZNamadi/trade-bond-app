@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './app.module';
+import { configureApp } from './app.setup';
 
 describe('security hardening', () => {
   let app: INestApplication;
@@ -19,6 +20,7 @@ describe('security hardening', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    configureApp(app as any);
     await app.init();
   });
 

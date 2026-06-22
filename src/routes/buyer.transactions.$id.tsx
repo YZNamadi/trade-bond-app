@@ -17,8 +17,16 @@ function TxDetails() {
   const tx = useStore((s) => s.transactions.find((t) => t.id === id));
   const session = useStore((s) => s.session);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
-  const [paymentRef, setPaymentRef] = useState<string | null>(null);
+  const [paymentSession, setPaymentSession] = useState<{
+    authorizationUrl: string | null;
+    reference: string;
+    provider?: string;
+    collectionStrategy?: string;
+    accountNumber?: string | null;
+    accountName?: string | null;
+    bankName?: string | null;
+    expiresAt?: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<Array<{ type: string; title: string; description?: string | null; createdAt: number }>>([]);
   const [disputeId, setDisputeId] = useState<string | null>(null);
@@ -111,8 +119,16 @@ function TxDetails() {
       if (!tx) return;
       if (canPay) {
         const init = await store.initializeEscrowFunding(tx.id);
-        setPaymentUrl(init.authorization_url);
-        setPaymentRef(init.reference);
+        setPaymentSession({
+          authorizationUrl: init.authorization_url ?? null,
+          reference: init.reference,
+          provider: init.provider,
+          collectionStrategy: init.collectionStrategy,
+          accountNumber: init.accountNumber ?? null,
+          accountName: init.accountName ?? null,
+          bankName: init.bankName ?? null,
+          expiresAt: init.expiresAt ?? null,
+        });
         setPaymentOpen(true);
         return;
       }
@@ -296,11 +312,18 @@ function TxDetails() {
       <PaymentDialog
         open={paymentOpen}
         onOpenChange={setPaymentOpen}
-        authorizationUrl={paymentUrl}
+        authorizationUrl={paymentSession?.authorizationUrl ?? null}
         amountLabel={tx ? formatNGN(tx.amount) : ""}
+        paymentProvider={paymentSession?.provider ?? null}
+        collectionStrategy={paymentSession?.collectionStrategy ?? null}
+        accountNumber={paymentSession?.accountNumber ?? null}
+        accountName={paymentSession?.accountName ?? null}
+        bankName={paymentSession?.bankName ?? null}
+        expiresAt={paymentSession?.expiresAt ?? null}
+        paymentReference={paymentSession?.reference ?? null}
         onVerify={async () => {
-          if (!paymentRef) throw new Error("Missing payment reference");
-          await store.verifyEscrowFunding(id, paymentRef);
+          if (!paymentSession?.reference) throw new Error("Missing payment reference");
+          return store.verifyEscrowFunding(id, paymentSession.reference);
         }}
         pollPaid={async () => {
           const latest = await store.refreshTransaction(id);

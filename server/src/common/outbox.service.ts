@@ -26,14 +26,16 @@ export class OutboxService {
 
   async enqueue(input: { type: string; dedupeKey?: string | null; payload: Record<string, any>; runAt?: Date; maxAttempts?: number }) {
     const dedupeKey = input.dedupeKey ? String(input.dedupeKey).slice(0, 200) : null;
+    const maxAttempts = Math.max(1, Math.min(50, Number(input.maxAttempts ?? 10)));
+    const nextRunAt = input.runAt ?? now();
     const job = this.jobsRepository.create({
       type: input.type,
       dedupeKey,
       payload: input.payload,
       status: 'PENDING' as OutboxJobStatus,
       attempts: 0,
-      maxAttempts: Math.max(1, Math.min(50, Number(input.maxAttempts ?? 10))),
-      nextRunAt: input.runAt ?? now(),
+      maxAttempts,
+      nextRunAt,
       lockedAt: null,
       lockedBy: null,
       lastError: null,
@@ -48,7 +50,25 @@ export class OutboxService {
         .execute();
       if (res.identifiers?.length) return job;
       const existing = await this.jobsRepository.findOne({ where: { type: input.type, dedupeKey } as any });
-      if (existing) return existing;
+      if (existing) {
+        // Allow explicit retries and reconciliation to reactivate terminal jobs while
+        // keeping active jobs deduplicated.
+        if (existing.status === 'DONE' || existing.status === 'FAILED') {
+          await this.jobsRepository.update(existing.id, {
+            payload: input.payload,
+            status: 'PENDING' as OutboxJobStatus,
+            attempts: 0,
+            maxAttempts,
+            nextRunAt,
+            lockedAt: null,
+            lockedBy: null,
+            lastError: null,
+          } as any);
+          const refreshed = await this.jobsRepository.findOne({ where: { id: existing.id } as any });
+          if (refreshed) return refreshed;
+        }
+        return existing;
+      }
       throw new Error('Outbox enqueue failed');
     }
     await this.jobsRepository.insert(job as any);

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Users, Scale, Activity } from "lucide-react";
+import { ShieldCheck, Users, Scale, Activity, ActivitySquare } from "lucide-react";
 import { store } from "@/lib/mock-store";
 
 export const Route = createFileRoute("/admin/")({
@@ -91,12 +91,12 @@ function AdminDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
         <Card title="Seller onboarding" value={view.onboarding} sub="Pending reviews" to="/admin/seller-onboarding" icon={Users} />
         <Card title="Disputes" value={view.disputes} sub="Open or awaiting action" to="/admin/disputes" icon={Scale} />
         <Card title="Settlement" value={view.settlement} sub="Pending provider confirmation" to="/admin/transactions" icon={Activity} />
+        <Card title="Reconciliation" value="Live" sub="Provider events and money movements" to="/admin/reconciliation" icon={ActivitySquare} />
       </div>
     </div>
   );
 }
-

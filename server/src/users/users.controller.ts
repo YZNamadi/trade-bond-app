@@ -74,6 +74,12 @@ export class UsersController {
   }
 
   @UseGuards(AuthGuard('jwt'))
+  @Get('banks')
+  async listBanks() {
+    return this.usersService.listSupportedBanks();
+  }
+
+  @UseGuards(AuthGuard('jwt'))
   @Get('me/bank-account')
   async myBankAccount(@Request() req: any) {
     return this.usersService.getMyBankAccount(req.user.userId);

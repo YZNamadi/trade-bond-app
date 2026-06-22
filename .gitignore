@@ -1,6 +1,7 @@
 # Logs
 logs
 *.log
+*.pid
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -10,10 +11,15 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+coverage
 .output
 .vinxi
 .tanstack/**
 .nitro
+.cache
+.turbo
+.eslintcache
+*.tsbuildinfo
 *.local
 
 # Wrangler / Cloudflare
@@ -24,6 +30,7 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.history
 .DS_Store
 *.suo
 *.ntvs*
@@ -39,3 +46,10 @@ db.sqlite
 server/db.sqlite
 server/uploads/
 server/server/uploads/
+
+# Mobile / native build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+ios/App/build/
+DerivedData/

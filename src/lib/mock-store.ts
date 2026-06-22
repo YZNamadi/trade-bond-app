@@ -106,6 +106,33 @@ type ApiTransaction = {
   updatedAt?: string | number | null;
 };
 
+type ApiPaymentVerification = {
+  transaction: ApiTransaction;
+  funded: boolean;
+  paymentStatus: string;
+};
+
+type ApiPaymentInitFlat = {
+  authorization_url?: string | null;
+  access_code?: string | null;
+  reference: string;
+  provider?: string;
+  collectionStrategy?: "PAY_WITH_TRANSFER" | "RESERVED_ACCOUNT";
+  accountNumber?: string | null;
+  accountName?: string | null;
+  bankName?: string | null;
+  expiresAt?: string | null;
+  payWithTransferId?: string | null;
+  customerReference?: string | null;
+};
+
+type ApiPaymentInitResponse =
+  | ApiPaymentInitFlat
+  | {
+      statusCode?: number;
+      body?: ApiPaymentInitFlat;
+    };
+
 type ApiTransactionEvent = {
   id?: string;
   transactionId: string;
@@ -159,6 +186,58 @@ type ApiBankAccount = {
   accountName: string | null;
   accountNumberMasked: string | null;
   verifiedAt: string | null;
+};
+
+type ApiReconciliationOverview = {
+  provider: string;
+  pendingMovements: number;
+  failedMovements: number;
+  unprocessedEvents: number;
+  latestRun: ApiReconciliationRun | null;
+};
+
+type ApiMoneyMovement = {
+  id: string;
+  provider: string;
+  kind: string;
+  status: string;
+  currency: string;
+  amountMinor: number;
+  transactionId?: string | null;
+  reference: string;
+  providerObjectType?: string | null;
+  providerObjectId?: string | null;
+  createdAt: string | number;
+  updatedAt?: string | number | null;
+  metadata?: any;
+};
+
+type ApiProviderEvent = {
+  id: string;
+  provider: string;
+  providerEventId: string;
+  eventType: string;
+  resourceType?: string | null;
+  resourceId?: string | null;
+  signatureVerified: boolean;
+  receivedAt?: string | number | null;
+  processedAt?: string | number | null;
+  processingError?: string | null;
+  createdAt: string | number;
+};
+
+type ApiReconciliationRun = {
+  id: string;
+  provider: string;
+  runType: string;
+  status: string;
+  startedAt?: string | number | null;
+  completedAt?: string | number | null;
+  findingsCount: number;
+  mismatchAmountMinor: number;
+  error?: string | null;
+  summary?: any;
+  createdAt: string | number;
 };
 
 type ApiDisputeStatus =
@@ -295,7 +374,7 @@ const initial: State = {
   notifications: [],
 };
 
-const STORAGE_KEY = "trustytrade_state_v3";
+const STORAGE_KEY = "trustytrade_state_v4";
 
 function apiBaseUrl() {
   const envUrl = (import.meta as any)?.env?.VITE_API_URL as string | undefined;
@@ -318,6 +397,21 @@ function readCookie(name: string) {
 function csrfHeader(): Record<string, string> {
   const token = readCookie("csrf_token");
   return token ? { "X-CSRF-Token": token } : {};
+}
+
+function adminHeader(path: string): Record<string, string> {
+  if (!path.includes("/admin")) return {};
+  const token = (import.meta as any)?.env?.VITE_ADMIN_API_TOKEN as string | undefined;
+  return token ? { "x-admin-token": token } : {};
+}
+
+function stateStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
 }
 
 function randomId(): string {
@@ -343,6 +437,7 @@ async function apiRequest<T>(path: string, init?: RequestInit & { _retry?: boole
   const headers: Record<string, string> = {
     ...(init?.headers as any),
     ...(isMutating ? csrfHeader() : {}),
+    ...adminHeader(path),
     ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
   };
   const res = await fetch(`${apiBaseUrl()}${path}`, {
@@ -390,6 +485,7 @@ async function apiUpload<T>(path: string, form: FormData, init?: RequestInit & {
     headers: {
       ...(init?.headers as any),
       ...csrfHeader(),
+      ...adminHeader(path),
       "Idempotency-Key": idempotencyKey,
     },
     body: form,
@@ -504,10 +600,18 @@ function sanitizeTx(v: unknown): Transaction | null {
   };
 }
 
+function normalizePaymentInit(result: ApiPaymentInitResponse): ApiPaymentInitFlat {
+  if (result && typeof result === "object" && "body" in result && result.body) {
+    return result.body;
+  }
+  return result as ApiPaymentInitFlat;
+}
+
 function load(): State {
-  if (typeof window === "undefined") return initial;
+  const storage = stateStorage();
+  if (!storage) return initial;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return initial;
     const parsed = JSON.parse(raw) as Partial<State>;
     const loaded = { ...initial, ...parsed };
@@ -535,8 +639,9 @@ let state: State = load();
 const listeners = new Set<() => void>();
 
 function persist() {
-  if (typeof window !== "undefined") {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  const storage = stateStorage();
+  if (storage) {
+    try { storage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
   }
   listeners.forEach((l) => l());
 }
@@ -592,7 +697,7 @@ export const store = {
       store.setSession(session);
       await store.refreshTransactions();
     } catch {
-      state = { ...state, session: null, transactions: [], sellers: [] };
+      state = { ...state, session: null, accounts: [], activeAccountId: null, transactions: [], sellers: [] };
       persist();
     }
   },
@@ -644,8 +749,16 @@ export const store = {
         } catch {}
       }
     }
-    state = { ...state, session: null, transactions: [], sellers: [] };
+    state = { ...state, session: null, accounts: [], activeAccountId: null, transactions: [], sellers: [] };
     persist();
+  },
+  async applySeller(input: { desiredTrustyTag?: string; bankName: string; accountNumber: string; accountName: string }) {
+    if (!state.session) throw new Error("Not authenticated");
+    return apiRequest<ApiSellerOnboardingRequest>("/users/me/seller/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
   },
   async lookupSellerByTrustyTag(trustyTag: string) {
     type SellerLookup = {
@@ -677,7 +790,7 @@ export const store = {
   },
   async listBanks() {
     if (!state.session) throw new Error("Not authenticated");
-    return apiRequest<ApiBank[]>("/paystack/banks");
+    return apiRequest<ApiBank[]>("/users/banks");
   },
   async fetchMyBankAccount() {
     if (!state.session) throw new Error("Not authenticated");
@@ -817,19 +930,26 @@ export const store = {
   },
   async initializeEscrowFunding(id: string) {
     if (!state.session) throw new Error("Not authenticated");
-    return apiRequest<{ authorization_url: string | null; reference: string }>(`/transactions/${id}/pay`, {
+    const raw = await apiRequest<ApiPaymentInitResponse>(`/transactions/${id}/pay`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
+    return normalizePaymentInit(raw);
   },
   async verifyEscrowFunding(id: string, reference: string) {
     if (!state.session) throw new Error("Not authenticated");
-    await apiRequest(`/transactions/${id}/verify`, {
+    const result = await apiRequest<ApiPaymentVerification>(`/transactions/${id}/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reference }),
     });
-    await store.refreshTransactions();
+    const tx = toClientTx(result.transaction);
+    state = { ...state, transactions: [tx, ...state.transactions.filter((t) => t.id !== id)] };
+    persist();
+    if (result.funded) {
+      await store.refreshTransactions();
+    }
+    return result.funded;
   },
   async releaseFunds(id: string) {
     if (!state.session) throw new Error("Not authenticated");
@@ -949,6 +1069,51 @@ export const store = {
     return apiRequest(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+    });
+  },
+  async adminGetReconciliationOverview(provider = "anchor") {
+    if (!state.session) throw new Error("Not authenticated");
+    if (state.session.role !== "admin") throw new Error("Not authorized");
+    return apiRequest<ApiReconciliationOverview>(`/money/admin/reconciliation/overview?provider=${encodeURIComponent(provider)}`);
+  },
+  async adminListMoneyMovements(input?: { provider?: string; status?: string; transactionId?: string; take?: number }) {
+    if (!state.session) throw new Error("Not authenticated");
+    if (state.session.role !== "admin") throw new Error("Not authorized");
+    const qs = new URLSearchParams();
+    if (input?.provider) qs.set("provider", input.provider);
+    if (input?.status) qs.set("status", input.status);
+    if (input?.transactionId) qs.set("transactionId", input.transactionId);
+    if (input?.take) qs.set("take", String(input.take));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiRequest<ApiMoneyMovement[]>(`/money/admin/reconciliation/movements${suffix}`);
+  },
+  async adminListProviderEvents(input?: { provider?: string; eventType?: string; take?: number }) {
+    if (!state.session) throw new Error("Not authenticated");
+    if (state.session.role !== "admin") throw new Error("Not authorized");
+    const qs = new URLSearchParams();
+    if (input?.provider) qs.set("provider", input.provider);
+    if (input?.eventType) qs.set("eventType", input.eventType);
+    if (input?.take) qs.set("take", String(input.take));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiRequest<ApiProviderEvent[]>(`/money/admin/reconciliation/events${suffix}`);
+  },
+  async adminListReconciliationRuns(input?: { provider?: string; runType?: string; take?: number }) {
+    if (!state.session) throw new Error("Not authenticated");
+    if (state.session.role !== "admin") throw new Error("Not authorized");
+    const qs = new URLSearchParams();
+    if (input?.provider) qs.set("provider", input.provider);
+    if (input?.runType) qs.set("runType", input.runType);
+    if (input?.take) qs.set("take", String(input.take));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiRequest<ApiReconciliationRun[]>(`/money/admin/reconciliation/runs${suffix}`);
+  },
+  async adminRunReconciliation(provider = "anchor") {
+    if (!state.session) throw new Error("Not authenticated");
+    if (state.session.role !== "admin") throw new Error("Not authorized");
+    return apiRequest<ApiReconciliationRun>("/money/admin/reconciliation/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
     });
   },
   markAllRead() {

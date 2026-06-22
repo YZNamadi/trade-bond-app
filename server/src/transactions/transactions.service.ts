@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, DeepPartial, EntityManager, Repository } from 'typeorm';
 import { createHash, createHmac, randomBytes } from 'crypto';
@@ -17,6 +17,8 @@ import { getRequestContext } from '../observability/request-context';
 import { DisputesService } from '../disputes/disputes.service';
 import { OutboxService } from '../common/outbox.service';
 import { LedgerService } from '../common/ledger.service';
+import { AnchorService } from '../anchor/anchor.service';
+import { MoneyMovement } from '../money/money-movement.entity';
 
 function normalizeStatus(status: TransactionStatus): TransactionStatus {
   switch (status) {
@@ -55,7 +57,17 @@ export class TransactionsService {
     private disputesService: DisputesService,
     private outboxService: OutboxService,
     private ledgerService: LedgerService,
+    @Inject(forwardRef(() => AnchorService))
+    private anchorService: AnchorService,
   ) {}
+
+  private activeFundingProvider() {
+    return this.anchorService.isEnabled() ? 'anchor' : 'paystack';
+  }
+
+  private activeSettlementProvider() {
+    return this.anchorService.activeSettlementProvider() === 'anchor' ? 'anchor' : 'paystack';
+  }
 
   private supportsRowLock() {
     return this.dataSource.options.type === 'postgres';
@@ -129,9 +141,11 @@ export class TransactionsService {
     metadata?: Record<string, unknown>,
     actor?: { userId: string; role: string } | null,
     status?: { from: TransactionStatus | null; to: TransactionStatus | null } | null,
+    manager?: EntityManager | null,
   ) {
     const ctx = getRequestContext();
-    const event = this.transactionEventsRepository.create({
+    const repo = manager ? manager.getRepository(TransactionEvent) : this.transactionEventsRepository;
+    const event = repo.create({
       transactionId,
       type,
       title: this.eventTitle(type),
@@ -143,7 +157,7 @@ export class TransactionsService {
       fromStatus: status?.from ?? null,
       toStatus: status?.to ?? null,
     });
-    await this.transactionEventsRepository.save(event);
+    await repo.save(event);
   }
 
   async create(createTransactionDto: CreateTransactionDto, userId: string, idempotencyKey?: string): Promise<Transaction> {
@@ -443,6 +457,52 @@ export class TransactionsService {
         if (normalized !== TransactionStatus.CREATED) {
           throw new BadRequestException('Transaction is not eligible for funding');
         }
+        if (this.activeFundingProvider() === 'anchor') {
+          if (tx.paymentReference) {
+            return {
+              statusCode: 200,
+              body: {
+                provider: 'anchor',
+                reference: tx.paymentReference,
+                paymentStatus: 'pending',
+              },
+            };
+          }
+          const buyer = tx.buyer;
+          if (!buyer) throw new BadRequestException('Buyer profile not available');
+          const paymentData = await this.anchorService.initializeCollection(tx, buyer);
+          tx.paymentReference = String(paymentData.reference || '').trim();
+          await this.transactionsRepository.save(tx);
+          await this.recordEvent(
+            tx.id,
+            TransactionEventType.PAYMENT_INITIALIZED,
+            'Payment initialized with provider',
+            {
+              provider: 'anchor',
+              collectionStrategy: paymentData.collectionStrategy,
+              reference: tx.paymentReference,
+              accountNumber: paymentData.accountNumber,
+              expiresAt: paymentData.expiresAt ?? null,
+            },
+            { userId, role: UserRole.BUYER },
+            { from: TransactionStatus.CREATED, to: TransactionStatus.CREATED },
+          );
+          await this.auditService.record({
+            action: 'payment.initialize',
+            actorUserId: userId,
+            actorRole: UserRole.BUYER,
+            targetType: 'transaction',
+            targetId: tx.id,
+            after: {
+              provider: 'anchor',
+              reference: tx.paymentReference,
+              accountNumber: paymentData.accountNumber,
+              collectionStrategy: paymentData.collectionStrategy,
+            },
+            outcome: 'ok',
+          });
+          return { statusCode: 200, body: paymentData as any };
+        }
         if (tx.paymentReference) {
           if (tx.paystackAuthorizationUrl) {
             return {
@@ -529,6 +589,9 @@ export class TransactionsService {
   }
 
   async markFundedByReference(reference: string) {
+    if (this.activeFundingProvider() === 'anchor') {
+      return null;
+    }
     return this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(Transaction);
       const tx = await repo.findOne({
@@ -591,6 +654,7 @@ export class TransactionsService {
         { reference, provider: 'paystack', source: 'webhook', paidAmount: checks.paidAmount, currency: checks.paidCurrency },
         null,
         { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+        manager,
       );
       await this.recordEvent(
         saved.id,
@@ -599,6 +663,7 @@ export class TransactionsService {
         { reference, provider: 'paystack', source: 'webhook' },
         null,
         { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+        manager,
       );
       await this.auditService.record({
         action: 'payment.webhook.funded',
@@ -607,7 +672,7 @@ export class TransactionsService {
         before: { status: TransactionStatus.CREATED },
         after: { status: TransactionStatus.FUNDED, reference, providerTxId: checks.providerTxId },
         outcome: 'ok',
-      });
+      }, manager);
       return saved;
     });
   }
@@ -618,7 +683,14 @@ export class TransactionsService {
       key: idempotencyKey,
       requestFingerprint: { id, reference },
       handler: async () => {
-        const saved = await this.dataSource.transaction(async (manager) => {
+        if (this.activeFundingProvider() === 'anchor') {
+          return this.verifyAnchorPayment(id, reference, userId);
+        }
+        const verificationResult = await this.dataSource.transaction(async (manager): Promise<{
+          transaction: Transaction;
+          funded: boolean;
+          paymentStatus: string;
+        }> => {
           const { tx, repo } = await this.loadForUpdate(manager, id);
           if (tx.buyerId !== userId) {
             throw new ForbiddenException('Only buyer can verify payment');
@@ -635,7 +707,7 @@ export class TransactionsService {
               TransactionStatus.REFUNDED,
             ].includes(normalized)
           ) {
-            return tx;
+            return { transaction: tx, funded: true, paymentStatus: 'success' };
           }
           if (normalized !== TransactionStatus.CREATED) {
             throw new BadRequestException('Transaction is not eligible for verification');
@@ -649,7 +721,9 @@ export class TransactionsService {
           const verification = await this.paystackService.verifyTransaction(reference);
           const result = this.interpretPaystackVerification(tx, verification, tx.buyer?.email || '');
           if (result.kind !== 'ok') {
-            return tx;
+            const pending = await repo.findOne({ where: { id: tx.id }, relations: { buyer: true, seller: true } });
+            if (!pending) throw new NotFoundException(`Transaction #${id} not found`);
+            return { transaction: pending, funded: false, paymentStatus: result.providerStatus };
           }
           const checks = result;
           const ok = await this.atomicTransition(manager, {
@@ -677,7 +751,7 @@ export class TransactionsService {
                 TransactionStatus.REFUNDED,
               ].includes(s)
             ) {
-              return updated;
+              return { transaction: updated, funded: true, paymentStatus: 'success' };
             }
             throw new BadRequestException('Concurrent update detected');
           }
@@ -698,6 +772,7 @@ export class TransactionsService {
               { reference, provider: 'paystack', source: 'verify', paidAmount: checks.paidAmount, currency: checks.paidCurrency },
               { userId, role: UserRole.BUYER },
               { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+              manager,
             );
             await this.recordEvent(
               updated.id,
@@ -706,6 +781,7 @@ export class TransactionsService {
               { reference, provider: 'paystack', source: 'verify' },
               { userId, role: UserRole.BUYER },
               { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+              manager,
             );
             await this.auditService.record({
               action: 'payment.verify',
@@ -716,14 +792,285 @@ export class TransactionsService {
               before: { status: TransactionStatus.CREATED },
               after: { status: TransactionStatus.FUNDED, reference, providerTxId: checks.providerTxId },
               outcome: 'ok',
-            });
+            }, manager);
           }
-          return updated;
+          return { transaction: updated, funded: true, paymentStatus: 'success' };
         });
-        const full = await this.findOne(saved.id, userId);
-        return { statusCode: 200, body: full };
+        const full = await this.findOne(verificationResult.transaction.id, userId);
+        return {
+          statusCode: 200,
+          body: {
+            transaction: full,
+            funded: verificationResult.funded,
+            paymentStatus: verificationResult.paymentStatus,
+          },
+        };
       },
     });
+  }
+
+  private async verifyAnchorPayment(id: string, reference: string, userId: string) {
+    const verificationResult = await this.dataSource.transaction(async (manager): Promise<{
+      transaction: Transaction;
+      funded: boolean;
+      paymentStatus: string;
+    }> => {
+      const { tx, repo } = await this.loadForUpdate(manager, id);
+      if (tx.buyerId !== userId) {
+        throw new ForbiddenException('Only buyer can verify payment');
+      }
+      const normalized = normalizeStatus(tx.status);
+      if (
+        [
+          TransactionStatus.FUNDED,
+          TransactionStatus.SHIPPED,
+          TransactionStatus.DELIVERED,
+          TransactionStatus.RELEASE_PENDING,
+          TransactionStatus.RELEASED,
+          TransactionStatus.REFUND_PENDING,
+          TransactionStatus.REFUNDED,
+        ].includes(normalized)
+      ) {
+        return { transaction: tx, funded: true, paymentStatus: 'success' };
+      }
+      if (normalized !== TransactionStatus.CREATED) {
+        throw new BadRequestException('Transaction is not eligible for verification');
+      }
+      if (!tx.paymentReference) {
+        throw new BadRequestException('Payment was not initialized for this transaction');
+      }
+      if (tx.paymentReference !== reference) {
+        throw new BadRequestException('Invalid payment reference');
+      }
+      const movementRepo = manager.getRepository(MoneyMovement);
+      const movement = await movementRepo.findOne({
+        where: {
+          transactionId: tx.id,
+          provider: 'anchor',
+          kind: 'PAYIN',
+          reference,
+        } as any,
+        order: { createdAt: 'DESC' } as any,
+      });
+      const pending = await repo.findOne({ where: { id: tx.id }, relations: { buyer: true, seller: true } });
+      if (!pending) throw new NotFoundException(`Transaction #${id} not found`);
+      if (!movement) {
+        return { transaction: pending, funded: false, paymentStatus: 'pending' };
+      }
+      if (movement.status !== 'COMPLETED') {
+        return { transaction: pending, funded: false, paymentStatus: String(movement.status || 'pending').toLowerCase() };
+      }
+      const amountMinor = Number(movement.amountMinor || 0);
+      const ok = await this.atomicTransition(manager, {
+        id: tx.id,
+        from: TransactionStatus.CREATED,
+        to: TransactionStatus.FUNDED,
+      });
+      const updated = await repo.findOne({ where: { id: tx.id }, relations: { buyer: true, seller: true } });
+      if (!updated) throw new NotFoundException(`Transaction #${id} not found`);
+      if (!ok) {
+        const s = normalizeStatus(updated.status);
+        if (
+          [
+            TransactionStatus.FUNDED,
+            TransactionStatus.SHIPPED,
+            TransactionStatus.DELIVERED,
+            TransactionStatus.RELEASE_PENDING,
+            TransactionStatus.RELEASED,
+            TransactionStatus.REFUND_PENDING,
+            TransactionStatus.REFUNDED,
+          ].includes(s)
+        ) {
+          return { transaction: updated, funded: true, paymentStatus: 'success' };
+        }
+        throw new BadRequestException('Concurrent update detected');
+      }
+      await this.ledgerService.recordInManager(manager, {
+        transactionId: updated.id,
+        eventType: 'PAYMENT_FUNDED',
+        amountMinor,
+        currency: String(movement.currency || updated.currency || Currency.NGN),
+        provider: 'anchor',
+        providerRef: reference,
+        metadata: {
+          payinId: movement.providerObjectId,
+        },
+      });
+      await this.recordEvent(
+        updated.id,
+        TransactionEventType.PAYMENT_VERIFIED,
+        'Payment verified with provider',
+        { reference, provider: 'anchor', source: 'verify', amountMinor },
+        { userId, role: UserRole.BUYER },
+        { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+        manager,
+      );
+      await this.recordEvent(
+        updated.id,
+        TransactionEventType.ESCROW_FUNDED,
+        'Funds secured in escrow',
+        { reference, provider: 'anchor', source: 'verify' },
+        { userId, role: UserRole.BUYER },
+        { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+        manager,
+      );
+      await this.auditService.record({
+        action: 'payment.verify',
+        actorUserId: userId,
+        actorRole: UserRole.BUYER,
+        targetType: 'transaction',
+        targetId: updated.id,
+        before: { status: TransactionStatus.CREATED },
+        after: { status: TransactionStatus.FUNDED, reference, provider: 'anchor', payinId: movement.providerObjectId },
+        outcome: 'ok',
+      }, manager);
+      return { transaction: updated, funded: true, paymentStatus: 'success' };
+    });
+    const full = await this.findOne(verificationResult.transaction.id, userId);
+    return {
+      statusCode: 200,
+      body: {
+        transaction: full,
+        funded: verificationResult.funded,
+        paymentStatus: verificationResult.paymentStatus,
+      },
+    };
+  }
+
+  async markFundedFromAnchorPayin(input: {
+    reference: string;
+    payinId: string;
+    amountMinor: number;
+    currency: string;
+    paidAt?: Date | null;
+    providerPayload?: Record<string, unknown> | null;
+  }) {
+    if (!input.reference) return null;
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Transaction);
+      const tx = await repo.findOne({
+        where: { paymentReference: input.reference },
+        relations: { buyer: true, seller: true },
+        ...(this.supportsRowLock() ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+      } as any);
+      if (!tx) return null;
+      const normalized = normalizeStatus(tx.status);
+      await this.anchorService.upsertMovementFromWebhook({
+        transactionId: tx.id,
+        kind: 'PAYIN',
+        reference: input.reference,
+        providerObjectId: input.payinId,
+        providerObjectType: 'PayIn',
+        amountMinor: input.amountMinor,
+        currency: input.currency,
+        status: 'COMPLETED',
+        metadata: {
+          paidAt: input.paidAt ? input.paidAt.toISOString() : null,
+          providerPayload: input.providerPayload ?? null,
+        },
+      });
+      if (
+        [
+          TransactionStatus.FUNDED,
+          TransactionStatus.SHIPPED,
+          TransactionStatus.DELIVERED,
+          TransactionStatus.RELEASE_PENDING,
+          TransactionStatus.RELEASED,
+          TransactionStatus.REFUND_PENDING,
+          TransactionStatus.REFUNDED,
+        ].includes(normalized)
+      ) {
+        return tx;
+      }
+      if (normalized !== TransactionStatus.CREATED) {
+        return tx;
+      }
+      const ok = await this.atomicTransition(manager, {
+        id: tx.id,
+        from: TransactionStatus.CREATED,
+        to: TransactionStatus.FUNDED,
+      });
+      const saved = await repo.findOne({ where: { id: tx.id }, relations: { buyer: true, seller: true } });
+      if (!saved) return null;
+      if (!ok) return saved;
+      await this.ledgerService.recordInManager(manager, {
+        transactionId: saved.id,
+        eventType: 'PAYMENT_FUNDED',
+        amountMinor: input.amountMinor,
+        currency: input.currency || String(saved.currency || Currency.NGN),
+        provider: 'anchor',
+        providerRef: input.reference,
+        metadata: { payinId: input.payinId },
+      });
+      await this.recordEvent(
+        saved.id,
+        TransactionEventType.PAYMENT_VERIFIED,
+        'Payment verified via Anchor webhook',
+        { reference: input.reference, provider: 'anchor', source: 'webhook', payinId: input.payinId },
+        null,
+        { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+        manager,
+      );
+      await this.recordEvent(
+        saved.id,
+        TransactionEventType.ESCROW_FUNDED,
+        'Funds secured in escrow',
+        { reference: input.reference, provider: 'anchor', source: 'webhook' },
+        null,
+        { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
+        manager,
+      );
+      await this.auditService.record({
+        action: 'payment.webhook.funded',
+        targetType: 'transaction',
+        targetId: saved.id,
+        before: { status: TransactionStatus.CREATED },
+        after: { status: TransactionStatus.FUNDED, reference: input.reference, provider: 'anchor', payinId: input.payinId },
+        outcome: 'ok',
+      }, manager);
+      return saved;
+    });
+  }
+
+  async reconcileAnchorTransferWebhook(input: { eventType: string; payload: Record<string, any> }) {
+    const payment = input.payload?.data?.attributes?.payment || null;
+    const transferId = String(payment?.paymentId || payment?.transferId || '').trim();
+    const reference = String(payment?.paymentReference || payment?.reference || '').trim();
+    if (!transferId && !reference) return;
+
+    if (input.eventType.startsWith('nip.transfer')) {
+      let tx = null as Transaction | null;
+      if (reference) {
+        tx = await this.transactionsRepository.findOne({ where: [{ payoutReference: reference } as any, { refundProviderRefundId: reference } as any] });
+      }
+      if (!tx && transferId) {
+        tx = await this.transactionsRepository.findOne({
+          where: [{ payoutProviderTransferCode: transferId } as any, { refundProviderRefundId: transferId } as any],
+        });
+      }
+      if (!tx) return;
+      const status = input.eventType.endsWith('successful')
+        ? 'COMPLETED'
+        : input.eventType.endsWith('reversed')
+          ? 'REVERSED'
+          : 'FAILED';
+      await this.anchorService.upsertMovementFromWebhook({
+        transactionId: tx.id,
+        kind: normalizeStatus(tx.status) === TransactionStatus.RELEASE_PENDING ? 'PAYOUT' : 'REFUND',
+        reference: reference || tx.payoutReference || tx.paymentReference || tx.id,
+        providerObjectId: transferId || reference || tx.id,
+        providerObjectType: 'NIP_TRANSFER',
+        amountMinor: Number(payment?.amount || Math.round(Number(tx.amount) * 100)),
+        currency: String(payment?.currency || tx.currency || 'NGN'),
+        status: status as any,
+        metadata: { eventType: input.eventType },
+      });
+      await this.outboxService.enqueue({
+        type: normalizeStatus(tx.status) === TransactionStatus.RELEASE_PENDING ? 'payout.verify' : 'refund.verify',
+        dedupeKey: tx.id,
+        payload: { transactionId: tx.id },
+      }).catch(() => null);
+    }
   }
 
   async confirmDelivery(id: string, userId: string, idempotencyKey?: string) {
@@ -756,6 +1103,7 @@ export class TransactionsService {
                 undefined,
                 { userId, role: UserRole.BUYER },
                 { from: TransactionStatus.SHIPPED, to: TransactionStatus.DELIVERED },
+                manager,
               );
             }
           }
@@ -767,7 +1115,7 @@ export class TransactionsService {
             set: {
               payoutReference,
               payoutStatus: tx.payoutStatus || 'REQUESTED',
-              payoutProvider: tx.payoutProvider || 'paystack',
+              payoutProvider: tx.payoutProvider || this.activeSettlementProvider(),
             } as any,
           });
           const updated = await repo.findOne({ where: { id: tx.id }, relations: { buyer: true, seller: true } });
@@ -787,9 +1135,10 @@ export class TransactionsService {
               tx.id,
               TransactionEventType.FUNDS_RELEASED,
               'Release approved',
-              { custodian: 'paystack' },
+              { custodian: this.activeSettlementProvider() },
               { userId, role: UserRole.BUYER },
               { from: TransactionStatus.DELIVERED, to: TransactionStatus.RELEASE_PENDING },
+              manager,
             );
             await this.auditService.record({
               action: 'transaction.release.approved',
@@ -800,7 +1149,7 @@ export class TransactionsService {
               before: { status: TransactionStatus.DELIVERED },
               after: { status: TransactionStatus.RELEASE_PENDING },
               outcome: 'ok',
-            });
+            }, manager);
           }
           return updated;
         });
@@ -871,6 +1220,7 @@ export class TransactionsService {
               { trackingId },
               { userId, role: UserRole.SELLER },
               { from: TransactionStatus.FUNDED, to: TransactionStatus.SHIPPED },
+              manager,
             );
             await this.auditService.record({
               action: 'transaction.shipping.update',
@@ -881,7 +1231,7 @@ export class TransactionsService {
               before: { status: TransactionStatus.FUNDED },
               after: { status: TransactionStatus.SHIPPED, trackingId },
               outcome: 'ok',
-            });
+            }, manager);
           }
           return updated;
         });
@@ -925,6 +1275,7 @@ export class TransactionsService {
               undefined,
               { userId, role: actorRole },
               { from: normalized, to: TransactionStatus.DISPUTED },
+              manager,
             );
             await this.auditService.record({
               action: 'transaction.dispute.open',
@@ -935,7 +1286,7 @@ export class TransactionsService {
               before: { status: normalized },
               after: { status: TransactionStatus.DISPUTED },
               outcome: 'ok',
-            });
+            }, manager);
           }
           return updated;
         });

@@ -14,15 +14,28 @@ function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("buyer");
+  const [desiredTrustyTag, setDesiredTrustyTag] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountName, setAccountName] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !email || !password) return toast.error("Fill in all fields");
     if (password.length < 6) return toast.error("Password must be at least 6 characters");
+    if (role === "seller" && (!bankName || !accountNumber || !accountName)) {
+      return toast.error("Complete the seller onboarding fields");
+    }
     setLoading(true);
     try {
       const session = await store.signup({ name, email, password, role });
+      if (role === "seller") {
+        await store.applySeller({ desiredTrustyTag, bankName, accountNumber, accountName });
+        toast.success("Account created and seller onboarding submitted");
+        navigate({ to: "/buyer" });
+        return;
+      }
       toast.success("Account created");
       navigate({ to: session.role === "buyer" ? "/buyer" : "/seller" });
     } catch (e: any) {
@@ -41,7 +54,7 @@ function Signup() {
       <div className="mt-8 animate-[fade-in_0.4s_ease-out]">
         <h1 className="text-3xl font-bold tracking-tight">Create account</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Choose an account type. Buyer and Seller are separate identities.
+          Every new account starts as a buyer. Choose seller if you want to submit onboarding right away.
         </p>
       </div>
 
@@ -70,6 +83,20 @@ function Signup() {
         <Input icon={<User className="h-4 w-4" />} label="Full name" type="text" value={name} onChange={setName} placeholder="Ada Lovelace" />
         <Input icon={<Mail className="h-4 w-4" />} label="Email" type="email" value={email} onChange={setEmail} placeholder="you@example.com" />
         <Input icon={<Lock className="h-4 w-4" />} label="Password" type="password" value={password} onChange={setPassword} placeholder="At least 6 characters" />
+        {role === "seller" ? (
+          <div className="space-y-4 rounded-3xl border border-border bg-card p-4">
+            <div>
+              <div className="text-sm font-semibold">Seller onboarding</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                We submit your seller request after account creation. Approval happens before selling is enabled.
+              </div>
+            </div>
+            <Input icon={<StoreIcon className="h-4 w-4" />} label="Desired TrustyTag" type="text" value={desiredTrustyTag} onChange={setDesiredTrustyTag} placeholder="@techhaven.ng" />
+            <Input icon={<User className="h-4 w-4" />} label="Bank name" type="text" value={bankName} onChange={setBankName} placeholder="Access Bank" />
+            <Input icon={<Lock className="h-4 w-4" />} label="Account number" type="text" value={accountNumber} onChange={setAccountNumber} placeholder="0123456789" />
+            <Input icon={<User className="h-4 w-4" />} label="Account name" type="text" value={accountName} onChange={setAccountName} placeholder="Ada Lovelace" />
+          </div>
+        ) : null}
 
         <button
           type="submit" disabled={loading}
@@ -85,7 +112,7 @@ function Signup() {
 
       <p className="mt-auto pt-8 text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link to="/login" className="font-semibold text-primary">Log in</Link>
+        <Link to="/login" search={{ email: "" }} className="font-semibold text-primary">Log in</Link>
       </p>
     </div>
   );

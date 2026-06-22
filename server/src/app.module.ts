@@ -27,6 +27,13 @@ import { DisputesModule } from './disputes/disputes.module';
 import { OutboxJob } from './common/outbox-job.entity';
 import { LedgerEntry } from './common/ledger-entry.entity';
 import { TransactionMessage } from './transactions/transaction-message.entity';
+import { MoneyAccount } from './money/money-account.entity';
+import { MoneyCounterparty } from './money/money-counterparty.entity';
+import { MoneyMovement } from './money/money-movement.entity';
+import { ProviderEvent } from './money/provider-event.entity';
+import { ReconciliationRun } from './money/reconciliation-run.entity';
+import { MoneyModule } from './money/money.module';
+import { AnchorModule } from './anchor/anchor.module';
 
 @Module({
   imports: [
@@ -63,6 +70,11 @@ import { TransactionMessage } from './transactions/transaction-message.entity';
           OutboxJob,
           LedgerEntry,
           PaystackWebhookEvent,
+          MoneyAccount,
+          MoneyCounterparty,
+          MoneyMovement,
+          ProviderEvent,
+          ReconciliationRun,
         ];
         const common: Omit<TypeOrmModuleOptions, 'type'> = {
           entities,
@@ -94,6 +106,8 @@ import { TransactionMessage } from './transactions/transaction-message.entity';
     TransactionsModule,
     DisputesModule,
     PaystackModule,
+    MoneyModule,
+    AnchorModule,
     DatabaseModule,
   ],
   controllers: [HealthController],

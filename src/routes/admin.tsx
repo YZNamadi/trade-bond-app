@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, redirect, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Shield, Scale, Users, LogOut } from "lucide-react";
+import { LayoutDashboard, Shield, Scale, Users, LogOut, ActivitySquare } from "lucide-react";
 import { store, useStore } from "@/lib/mock-store";
 import { useEffect } from "react";
 
@@ -85,6 +85,7 @@ function AdminShell() {
               <NavLink to="/admin/seller-onboarding" icon={Users} label="Seller onboarding" />
               <NavLink to="/admin/disputes" icon={Scale} label="Disputes" />
               <NavLink to="/admin/transactions" icon={Shield} label="Transactions" />
+              <NavLink to="/admin/reconciliation" icon={ActivitySquare} label="Reconciliation" />
             </div>
 
             <div className="mt-4 border-t border-border pt-4">

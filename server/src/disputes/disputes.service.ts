@@ -366,7 +366,7 @@ export class DisputesService {
       before: { status: null },
       after: { status: DisputeStatus.OPENED, transactionId: tx.id },
       outcome: 'ok',
-    });
+    }, manager);
 
     return created;
   }
@@ -467,7 +467,7 @@ export class DisputesService {
             targetId: created.id,
             after: { disputeId: dispute.id, transactionId: dispute.transactionId, sha256, mimeType: created.mimeType, size: created.size },
             outcome: 'ok',
-          });
+          }, manager);
 
           return created;
         });
@@ -527,7 +527,7 @@ export class DisputesService {
         targetId: dispute.id,
         after: { evidenceId: evId ?? null },
         outcome: 'ok',
-      });
+      }, manager);
 
       return true;
     });
@@ -564,6 +564,7 @@ export class DisputesService {
           const tx = await txRepo.findOne({ where: { id: dispute.transactionId }, ...(lock ? { lock } : {}) });
           if (!tx) throw new NotFoundException('Transaction not found');
           const txStatusFrom = tx.status;
+          const txAmountMinor = Math.round(Number(tx.amount) * 100);
           if (tx.status !== TransactionStatus.DISPUTED) {
             await txRepo.update({ id: tx.id }, { status: TransactionStatus.DISPUTED } as any);
           }
@@ -574,25 +575,32 @@ export class DisputesService {
           let nextTxStatus: TransactionStatus | null = null;
 
           if (dto.outcome === 'refund') {
+            const refundAmountMinor = dto.refundAmountMinor ?? txAmountMinor;
+            if (!Number.isFinite(refundAmountMinor) || refundAmountMinor <= 0 || refundAmountMinor > txAmountMinor) {
+              throw new BadRequestException('Invalid refundAmountMinor');
+            }
             nextDisputeStatus = DisputeStatus.RESOLVED_FOR_BUYER;
             nextTxStatus = TransactionStatus.REFUND_PENDING;
             decision = {
               outcome: 'refund',
               justification: dto.justification,
-              refundAmountMinor: dto.refundAmountMinor ?? null,
-              currency: dto.currency ?? null,
+              refundAmountMinor,
+              currency: dto.currency ?? tx.currency ?? null,
               decidedByUserId: actor.userId,
               decidedAt: nowIso,
             };
           } else if (dto.outcome === 'partial_refund') {
             if (!dto.refundAmountMinor) throw new BadRequestException('Missing refundAmountMinor');
+            if (!Number.isFinite(dto.refundAmountMinor) || dto.refundAmountMinor <= 0 || dto.refundAmountMinor > txAmountMinor) {
+              throw new BadRequestException('Invalid refundAmountMinor');
+            }
             nextDisputeStatus = DisputeStatus.PARTIAL_REFUND;
             nextTxStatus = TransactionStatus.REFUND_PENDING;
             decision = {
               outcome: 'partial_refund',
               justification: dto.justification,
               refundAmountMinor: dto.refundAmountMinor,
-              currency: dto.currency ?? null,
+              currency: dto.currency ?? tx.currency ?? null,
               decidedByUserId: actor.userId,
               decidedAt: nowIso,
             };
@@ -674,7 +682,7 @@ export class DisputesService {
             before: { status: fromStatus },
             after: { status: updated.status, outcome: dto.outcome },
             outcome: 'ok',
-          });
+          }, manager);
 
           return updated;
         });

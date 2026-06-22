@@ -8,6 +8,7 @@ import { PaystackService } from '../paystack/paystack.service';
 import { LedgerService } from '../common/ledger.service';
 import { AuditService } from '../common/audit.service';
 import { TransactionsService } from './transactions.service';
+import { AnchorService } from '../anchor/anchor.service';
 
 function isTruthy(v: string | undefined) {
   return String(v || '').toLowerCase() === 'true';
@@ -29,9 +30,15 @@ export class SettlementWorkerService implements OnApplicationBootstrap, OnApplic
     private ledgerService: LedgerService,
     private auditService: AuditService,
     private transactionsService: TransactionsService,
+    private anchorService: AnchorService,
     @InjectRepository(Transaction)
     private txRepo: Repository<Transaction>,
   ) {}
+
+  private activeSettlementProvider(tx?: Transaction | null) {
+    const provider = String(tx?.payoutProvider || tx?.refundProvider || this.anchorService.activeSettlementProvider()).trim().toLowerCase();
+    return provider === 'anchor' ? 'anchor' : 'paystack';
+  }
 
   async onApplicationBootstrap() {
     const enabled = process.env.ENABLE_OUTBOX_WORKER ? isTruthy(process.env.ENABLE_OUTBOX_WORKER) : true;
@@ -137,6 +144,55 @@ export class SettlementWorkerService implements OnApplicationBootstrap, OnApplic
     if (payoutStatus === 'INITIATED' || payoutStatus === 'SENT') return;
     if (tx.payoutProviderTransferCode) return;
 
+    if (this.activeSettlementProvider(tx) === 'anchor') {
+      const sellerCounterparty = await this.anchorService.ensureCounterpartyForUser(tx.sellerId);
+      const reference = tx.payoutReference || payoutReferenceFor(tx.id);
+      if (!tx.payoutReference) {
+        await this.txRepo.update(tx.id, { payoutReference: reference } as any);
+      }
+      const amountMinor = Math.max(0, Math.round(Number(tx.amount) * 100));
+      if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+        await this.txRepo.update(tx.id, { payoutStatus: 'BLOCKED', payoutFailureReason: 'invalid_amount' } as any);
+        return;
+      }
+      const res = await this.anchorService.initiateNipTransfer({
+        amountMinor,
+        counterpartyId: String(sellerCounterparty.providerCounterpartyId || '').trim(),
+        currency: String(tx.currency || 'NGN'),
+        reason: `TrustyTrade payout for ${tx.id}`,
+        reference,
+      });
+      const transfer = (res as any)?.data;
+      const transferId = transfer?.id ? String(transfer.id) : null;
+      await this.txRepo.update(tx.id, {
+        payoutStatus: 'INITIATED',
+        payoutProvider: 'anchor',
+        payoutProviderTransferCode: transferId,
+        payoutInitiatedAt: new Date(),
+        payoutFailureReason: null,
+      } as any);
+      await this.ledgerService.record({
+        transactionId: tx.id,
+        eventType: 'PAYOUT_INITIATED',
+        amountMinor,
+        currency: String(tx.currency || 'NGN'),
+        provider: 'anchor',
+        providerRef: reference,
+        metadata: { transferId, counterpartyId: sellerCounterparty.providerCounterpartyId },
+      });
+      await this.auditService.record({
+        action: 'payout.initiated',
+        actorUserId: job.payload?.actorUserId ?? null,
+        actorRole: job.payload?.actorRole ?? null,
+        targetType: 'transaction',
+        targetId: tx.id,
+        after: { provider: 'anchor', reference, amountMinor, transferId },
+        outcome: 'ok',
+      });
+      await this.outboxService.enqueue({ type: 'payout.verify', dedupeKey: tx.id, payload: { transactionId: tx.id } }).catch(() => null);
+      return;
+    }
+
     const seller: any = (tx as any).seller;
     const recipient = String(seller?.paystackTransferRecipientCode || '').trim();
     if (!recipient || !seller?.bankVerifiedAt) {
@@ -198,6 +254,41 @@ export class SettlementWorkerService implements OnApplicationBootstrap, OnApplic
     const tx = await this.txRepo.findOne({ where: { id: txId } as any });
     if (!tx) return;
     if (tx.status !== TransactionStatus.RELEASE_PENDING) return;
+    if (this.activeSettlementProvider(tx) === 'anchor') {
+      const transferId = String(tx.payoutProviderTransferCode || '').trim();
+      if (!transferId) throw new Error('Missing payout transfer id');
+      const r = await this.anchorService.verifyTransfer(transferId);
+      const data = (r as any)?.data;
+      const providerStatus = String(data?.attributes?.status || '').toLowerCase();
+      if (providerStatus === 'completed') {
+        await this.txRepo.update(tx.id, { payoutStatus: 'SENT', status: TransactionStatus.RELEASED } as any);
+        const amountMinor = Number(data?.attributes?.amount) || Math.round(Number(tx.amount) * 100);
+        await this.ledgerService.record({
+          transactionId: tx.id,
+          eventType: 'PAYOUT_CONFIRMED',
+          amountMinor: Math.max(0, Math.floor(amountMinor)),
+          currency: String(data?.attributes?.currency || tx.currency || 'NGN'),
+          provider: 'anchor',
+          providerRef: String(tx.payoutReference || transferId),
+          metadata: { transferId },
+        });
+        return;
+      }
+      if (providerStatus === 'failed' || providerStatus === 'reversed') {
+        await this.txRepo.update(tx.id, { payoutStatus: 'FAILED', payoutFailureReason: providerStatus } as any);
+        await this.ledgerService.record({
+          transactionId: tx.id,
+          eventType: 'PAYOUT_FAILED',
+          amountMinor: Math.max(0, Math.round(Number(tx.amount) * 100)),
+          currency: String(tx.currency || 'NGN'),
+          provider: 'anchor',
+          providerRef: String(tx.payoutReference || transferId),
+          metadata: { providerStatus, transferId },
+        });
+        return;
+      }
+      throw new Error('Payout pending');
+    }
     const reference = String(tx.payoutReference || '').trim();
     if (!reference) throw new Error('Missing payout reference');
 
@@ -242,9 +333,57 @@ export class SettlementWorkerService implements OnApplicationBootstrap, OnApplic
   private async handleRefundInitiate(job: OutboxJob) {
     const txId = String(job.payload?.transactionId || '').trim();
     if (!txId) throw new Error('Missing transactionId');
-    const tx = await this.txRepo.findOne({ where: { id: txId } as any });
+    const tx = await this.txRepo.findOne({ where: { id: txId } as any, relations: { buyer: true } as any });
     if (!tx) return;
     if (tx.status !== TransactionStatus.REFUND_PENDING) return;
+
+    if (this.activeSettlementProvider(tx) === 'anchor') {
+      const amountMinorRaw = job.payload?.amountInKobo;
+      const amountMinor = typeof amountMinorRaw === 'number'
+        ? Math.max(0, Math.floor(amountMinorRaw))
+        : Math.max(0, Math.round(Number(tx.amount) * 100));
+      const buyerCounterparty = await this.anchorService.ensureCounterpartyForUser(tx.buyerId);
+      const reference = `tt_refund_${tx.id}_${amountMinor}`;
+      const res = await this.anchorService.initiateNipTransfer({
+        amountMinor,
+        counterpartyId: String(buyerCounterparty.providerCounterpartyId || '').trim(),
+        currency: String(tx.currency || 'NGN'),
+        reason: `TrustyTrade refund for ${tx.id}`,
+        reference,
+      });
+      const transfer = (res as any)?.data;
+      const refundId = transfer?.id ? String(transfer.id) : null;
+      const status = String(transfer?.attributes?.status || 'PENDING').toUpperCase();
+      await this.txRepo.update(tx.id, {
+        refundStatus: status,
+        refundProvider: 'anchor',
+        refundProviderRefundId: refundId,
+        refundInitiatedAt: new Date(),
+        refundFailureReason: null,
+      } as any);
+      await this.ledgerService.record({
+        transactionId: tx.id,
+        eventType: 'REFUND_INITIATED',
+        amountMinor,
+        currency: String(tx.currency || 'NGN'),
+        provider: 'anchor',
+        providerRef: reference,
+        metadata: { transferId: refundId, counterpartyId: buyerCounterparty.providerCounterpartyId },
+      });
+      await this.auditService.record({
+        action: 'refund.initiated',
+        actorUserId: job.payload?.actorUserId ?? null,
+        actorRole: job.payload?.actorRole ?? null,
+        targetType: 'transaction',
+        targetId: tx.id,
+        after: { provider: 'anchor', refundId, amountMinor },
+        outcome: 'ok',
+      });
+      if (refundId) {
+        await this.outboxService.enqueue({ type: 'refund.verify', dedupeKey: tx.id, payload: { transactionId: tx.id } }).catch(() => null);
+      }
+      return;
+    }
 
     const paymentRef = String(tx.paymentReference || '').trim();
     if (!paymentRef) throw new Error('Missing payment reference');
@@ -294,6 +433,45 @@ export class SettlementWorkerService implements OnApplicationBootstrap, OnApplic
     const tx = await this.txRepo.findOne({ where: { id: txId } as any });
     if (!tx) return;
     if (tx.status !== TransactionStatus.REFUND_PENDING) return;
+    if (this.activeSettlementProvider(tx) === 'anchor') {
+      const refundId = String(tx.refundProviderRefundId || '').trim();
+      if (!refundId) throw new Error('Missing refund transfer id');
+      const r = await this.anchorService.verifyTransfer(refundId);
+      const data = (r as any)?.data;
+      const providerStatus = String(data?.attributes?.status || '').toLowerCase();
+      if (providerStatus === 'completed') {
+        await this.txRepo.update(tx.id, {
+          refundStatus: 'PROCESSED',
+          refundProcessedAt: new Date(),
+          status: TransactionStatus.REFUNDED,
+        } as any);
+        await this.ledgerService.record({
+          transactionId: tx.id,
+          eventType: 'REFUND_CONFIRMED',
+          amountMinor: Math.max(0, Number(data?.attributes?.amount) || Math.round(Number(tx.amount) * 100)),
+          currency: String(data?.attributes?.currency || tx.currency || 'NGN'),
+          provider: 'anchor',
+          providerRef: refundId,
+          metadata: null,
+        });
+        return;
+      }
+      if (providerStatus === 'failed' || providerStatus === 'reversed') {
+        await this.txRepo.update(tx.id, { refundStatus: 'FAILED', refundFailureReason: providerStatus } as any);
+        await this.ledgerService.record({
+          transactionId: tx.id,
+          eventType: 'REFUND_FAILED',
+          amountMinor: Math.max(0, Math.round(Number(tx.amount) * 100)),
+          currency: String(tx.currency || 'NGN'),
+          provider: 'anchor',
+          providerRef: refundId,
+          metadata: { providerStatus },
+        });
+        return;
+      }
+      await this.txRepo.update(tx.id, { refundStatus: providerStatus ? providerStatus.toUpperCase() : 'PENDING' } as any);
+      throw new Error('Refund pending');
+    }
     const refundId = String(tx.refundProviderRefundId || '').trim();
     if (!refundId) throw new Error('Missing refund id');
 

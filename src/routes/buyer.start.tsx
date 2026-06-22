@@ -21,13 +21,20 @@ function StartTx() {
   const [amount, setAmount] = useState("");
   const [paying, setPaying] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
-  const [paymentRef, setPaymentRef] = useState<string | null>(null);
+  const [paymentSession, setPaymentSession] = useState<{
+    authorizationUrl: string | null;
+    reference: string;
+    provider?: string;
+    collectionStrategy?: string;
+    accountNumber?: string | null;
+    accountName?: string | null;
+    bankName?: string | null;
+    expiresAt?: string | null;
+  } | null>(null);
   const [paymentTxId, setPaymentTxId] = useState<string | null>(null);
 
   const seller = sellerId ? { id: sellerId, name: sellerName, handle: sellerHandle, category: "General" } : null;
   const amt = Number(amount.replace(/[^\d]/g, "")) || 0;
-  const fee = Math.round(amt * 0.015);
 
   const next = () => {
     if (step === 0 && !sellerId) return toast.error("Enter a valid TrustyTag");
@@ -45,8 +52,16 @@ function StartTx() {
       const tx = await store.createTx({ sellerId, title, description: desc, amount: amt, category: seller?.category || "General" });
       const init = await store.initializeEscrowFunding(tx.id);
       setPaymentTxId(tx.id);
-      setPaymentUrl(init.authorization_url);
-      setPaymentRef(init.reference);
+      setPaymentSession({
+        authorizationUrl: init.authorization_url ?? null,
+        reference: init.reference,
+        provider: init.provider,
+        collectionStrategy: init.collectionStrategy,
+        accountNumber: init.accountNumber ?? null,
+        accountName: init.accountName ?? null,
+        bankName: init.bankName ?? null,
+        expiresAt: init.expiresAt ?? null,
+      });
       setPaymentOpen(true);
     } catch (e: any) {
       toast.error(e?.message || "Payment failed");
@@ -145,11 +160,10 @@ function StartTx() {
         {step === 2 && seller && (
           <div className="space-y-4">
             <div className="rounded-3xl border border-border bg-card p-5">
-              <div className="text-xs uppercase tracking-wider text-muted-foreground">You'll pay</div>
-              <div className="mt-1 text-3xl font-bold">{formatNGN(amt + fee)}</div>
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">Escrow amount</div>
+              <div className="mt-1 text-3xl font-bold">{formatNGN(amt)}</div>
               <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm">
                 <Row label="Item amount" value={formatNGN(amt)} />
-                <Row label="Escrow fee (1.5%)" value={formatNGN(fee)} />
                 <Row label="Seller" value={seller.name} />
                 <Row label="Item" value={title} />
               </div>
@@ -169,15 +183,15 @@ function StartTx() {
                   <ShieldCheck className="h-10 w-10 text-primary animate-pulse" />
                 </div>
                 <div className="mt-6 text-lg font-bold">Processing payment…</div>
-                <div className="text-sm text-muted-foreground">Securing your funds via Paystack</div>
+                <div className="text-sm text-muted-foreground">Preparing secure provider funding instructions</div>
               </>
             ) : (
               <>
                 <div className="flex h-20 w-20 items-center justify-center rounded-full bg-accent">
                   <ShieldCheck className="h-10 w-10 text-primary" />
                 </div>
-                <div className="mt-6 text-lg font-bold">Ready to pay {formatNGN(amt + fee)}</div>
-                <div className="text-sm text-muted-foreground">Complete payment in a secure in-app Paystack checkout.</div>
+                <div className="mt-6 text-lg font-bold">Ready to fund escrow with {formatNGN(amt)}</div>
+                <div className="text-sm text-muted-foreground">We will open secure provider payment instructions for this escrow.</div>
               </>
             )}
           </div>
@@ -204,11 +218,18 @@ function StartTx() {
           }
           setPaymentOpen(true);
         }}
-        authorizationUrl={paymentUrl}
-        amountLabel={formatNGN(amt + fee)}
+        authorizationUrl={paymentSession?.authorizationUrl ?? null}
+        amountLabel={formatNGN(amt)}
+        paymentProvider={paymentSession?.provider ?? null}
+        collectionStrategy={paymentSession?.collectionStrategy ?? null}
+        accountNumber={paymentSession?.accountNumber ?? null}
+        accountName={paymentSession?.accountName ?? null}
+        bankName={paymentSession?.bankName ?? null}
+        expiresAt={paymentSession?.expiresAt ?? null}
+        paymentReference={paymentSession?.reference ?? null}
         onVerify={async () => {
-          if (!paymentTxId || !paymentRef) throw new Error("Missing payment session");
-          await store.verifyEscrowFunding(paymentTxId, paymentRef);
+          if (!paymentTxId || !paymentSession?.reference) throw new Error("Missing payment session");
+          return store.verifyEscrowFunding(paymentTxId, paymentSession.reference);
         }}
         pollPaid={async () => {
           if (!paymentTxId) return false;
