@@ -82,6 +82,32 @@ export class MoneyService {
     return this.providerEventsRepository.save(event);
   }
 
+  async markProviderEventProcessed(provider: string, providerEventId: string) {
+    await this.providerEventsRepository.update(
+      { provider, providerEventId } as any,
+      {
+        processedAt: new Date(),
+        processingError: null,
+      } as any,
+    );
+    return this.providerEventsRepository.findOne({
+      where: { provider, providerEventId } as any,
+    });
+  }
+
+  async markProviderEventFailed(provider: string, providerEventId: string, error: string) {
+    await this.providerEventsRepository.update(
+      { provider, providerEventId } as any,
+      {
+        processedAt: null,
+        processingError: String(error || 'provider_event_processing_failed').slice(0, 500),
+      } as any,
+    );
+    return this.providerEventsRepository.findOne({
+      where: { provider, providerEventId } as any,
+    });
+  }
+
   buildAnchorFundingPlan(input: {
     transaction: Transaction;
     buyerAnchorCustomerId: string;

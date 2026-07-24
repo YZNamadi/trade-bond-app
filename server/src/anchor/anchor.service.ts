@@ -568,4 +568,12 @@ export class AnchorService {
       included: input.included ?? null,
     });
   }
+
+  async markProviderEventProcessed(providerEventId: string) {
+    return this.moneyService.markProviderEventProcessed('anchor', providerEventId);
+  }
+
+  async markProviderEventFailed(providerEventId: string, error: string) {
+    return this.moneyService.markProviderEventFailed('anchor', providerEventId, error);
+  }
 }

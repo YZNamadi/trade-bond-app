@@ -20,6 +20,8 @@ export function createRedisClient() {
     maxRetriesPerRequest,
   });
 
+  client.on('error', () => null);
+  client.on('end', () => null);
   client.connect().catch(() => null);
   return client;
 }

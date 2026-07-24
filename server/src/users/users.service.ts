@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { DataSource, Like, Repository } from 'typeorm';
 import { User, UserRole } from './user.entity';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { SellerOnboardingRequest, SellerOnboardingStatus } from './seller-onboarding.entity';
@@ -14,6 +14,7 @@ type SafeUser = Omit<User, 'passwordHash' | 'syncTrustyTag'>;
 @Injectable()
 export class UsersService {
   constructor(
+    private dataSource: DataSource,
     @InjectRepository(User)
     private usersRepository: Repository<User>,
     @InjectRepository(SellerOnboardingRequest)
@@ -210,42 +211,56 @@ export class UsersService {
   }
 
   async reviewSellerOnboardingRequest(input: { requestId: string; adminUserId: string; approve: boolean; note?: string | null }) {
-    const req = await this.sellerOnboardingRepository.findOne({ where: { id: input.requestId } });
-    if (!req) throw new BadRequestException('Request not found');
-    if (req.status !== SellerOnboardingStatus.PENDING) {
-      return req;
-    }
-    const nextStatus = input.approve ? SellerOnboardingStatus.APPROVED : SellerOnboardingStatus.REJECTED;
-    req.status = nextStatus;
-    req.reviewedByUserId = input.adminUserId;
-    req.reviewedAt = new Date();
-    req.reviewNote = input.note ? String(input.note).slice(0, 500) : null;
-    const saved = await this.sellerOnboardingRepository.save(req);
-
-    if (nextStatus === SellerOnboardingStatus.APPROVED) {
-      const desired = saved.desiredTrustyTag ? this.normalizeTrustyTag(saved.desiredTrustyTag) : null;
-      const desiredLower = desired ? desired.toLowerCase() : null;
-      await this.usersRepository.update(saved.userId, {
-        role: UserRole.SELLER,
-        isVerified: true,
-        trustyTag: desired,
-        trustyTagLower: desiredLower,
-        bankName: saved.bankName,
-        accountNumber: saved.accountNumber,
-        accountName: saved.accountName,
+    return this.dataSource.transaction(async (manager) => {
+      const onboardingRepo = manager.getRepository(SellerOnboardingRequest);
+      const usersRepo = manager.getRepository(User);
+      const req = await onboardingRepo.findOne({
+        where: { id: input.requestId },
+        lock: this.dataSource.options.type === 'postgres' ? { mode: 'pessimistic_write' } : undefined,
       } as any);
-    }
+      if (!req) throw new BadRequestException('Request not found');
+      if (req.status !== SellerOnboardingStatus.PENDING) {
+        return req;
+      }
 
-    await this.auditService.record({
-      action: 'seller.onboarding.review',
-      actorUserId: input.adminUserId,
-      actorRole: UserRole.ADMIN,
-      targetType: 'seller_onboarding_request',
-      targetId: saved.id,
-      after: { status: saved.status },
-      outcome: input.approve ? 'approved' : 'rejected',
+      const nextStatus = input.approve ? SellerOnboardingStatus.APPROVED : SellerOnboardingStatus.REJECTED;
+      const reviewNote = input.note ? String(input.note).slice(0, 500) : null;
+
+      if (nextStatus === SellerOnboardingStatus.APPROVED) {
+        const desired = req.desiredTrustyTag ? this.normalizeTrustyTag(req.desiredTrustyTag) : null;
+        const desiredLower = desired ? desired.toLowerCase() : null;
+        const user = await usersRepo.findOne({
+          where: { id: req.userId },
+          lock: this.dataSource.options.type === 'postgres' ? { mode: 'pessimistic_write' } : undefined,
+        } as any);
+        if (!user) throw new NotFoundException('User not found');
+        user.role = UserRole.SELLER;
+        user.isVerified = true;
+        user.trustyTag = desired;
+        user.trustyTagLower = desiredLower;
+        user.bankName = req.bankName;
+        user.accountNumber = req.accountNumber;
+        user.accountName = req.accountName;
+        await usersRepo.save(user);
+      }
+
+      req.status = nextStatus;
+      req.reviewedByUserId = input.adminUserId;
+      req.reviewedAt = new Date();
+      req.reviewNote = reviewNote;
+      const saved = await onboardingRepo.save(req);
+
+      await this.auditService.record({
+        action: 'seller.onboarding.review',
+        actorUserId: input.adminUserId,
+        actorRole: UserRole.ADMIN,
+        targetType: 'seller_onboarding_request',
+        targetId: saved.id,
+        after: { status: saved.status },
+        outcome: input.approve ? 'approved' : 'rejected',
+      }, manager);
+      return saved;
     });
-    return saved;
   }
 
   async findAllSellers(query: string): Promise<User[]> {
@@ -292,21 +307,22 @@ export class UsersService {
   }
 
   async listSupportedBanks() {
+    type BankRow = { name: string; code: string; slug: string | null };
     const usingAnchor = this.activeSettlementProvider() === 'anchor';
     if (usingAnchor) {
       const banks = await this.anchorService.listBanks();
-      return (banks || []).map((b: any) => ({
+      return (banks || []).map((b: any): BankRow => ({
         name: String(b?.attributes?.name || ''),
         code: String(b?.attributes?.nipCode || ''),
         slug: String(b?.attributes?.code || '') || null,
-      })).filter((b) => b.name && b.code);
+      })).filter((b: BankRow) => b.name && b.code);
     }
     const banks = await this.paystackService.listBanks('NGN');
-    return (banks || []).map((b: any) => ({
+    return (banks || []).map((b: any): BankRow => ({
       name: String(b?.name || ''),
       code: String(b?.code || ''),
       slug: b?.slug ? String(b.slug) : null,
-    })).filter((b) => b.name && b.code);
+    })).filter((b: BankRow) => b.name && b.code);
   }
 
   async updateMyBankAccount(

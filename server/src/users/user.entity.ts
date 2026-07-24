@@ -36,14 +36,14 @@ export class User {
   role: UserRole;
 
   // Seller specific fields
-  @Column({ nullable: true, transformer: EncryptedTextTransformer })
-  bankName: string;
+  @Column({ type: 'text', nullable: true, transformer: EncryptedTextTransformer })
+  bankName: string | null;
 
-  @Column({ nullable: true, transformer: EncryptedTextTransformer })
-  accountNumber: string;
+  @Column({ type: 'text', nullable: true, transformer: EncryptedTextTransformer })
+  accountNumber: string | null;
 
-  @Column({ nullable: true, transformer: EncryptedTextTransformer })
-  accountName: string;
+  @Column({ type: 'text', nullable: true, transformer: EncryptedTextTransformer })
+  accountName: string | null;
 
   @Column({ type: 'text', nullable: true })
   bankCode: string | null;

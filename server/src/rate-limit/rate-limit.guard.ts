@@ -3,6 +3,8 @@ import { Reflector } from '@nestjs/core';
 import { RateLimitService } from './rate-limit.service';
 import { RATE_LIMIT_POLICY, type RateLimitPolicyName } from './rate-limit.decorator';
 import { PaystackService } from '../paystack/paystack.service';
+import { ConfigService } from '@nestjs/config';
+import { createHmac } from 'crypto';
 
 type Policy = { windowMs: number; limit: number; key: (req: any) => string; bypass?: (req: any) => Promise<boolean> | boolean };
 
@@ -25,7 +27,21 @@ export class RateLimitGuard implements CanActivate {
     private reflector: Reflector,
     private rateLimitService: RateLimitService,
     private paystackService: PaystackService,
+    private configService: ConfigService,
   ) {}
+
+  private anchorWebhookToken() {
+    return String(this.configService.get<string>('ANCHOR_WEBHOOK_TOKEN') || '').trim();
+  }
+
+  private isValidAnchorWebhookSignature(signature: string | undefined, rawBody: Buffer | string | undefined) {
+    const token = this.anchorWebhookToken();
+    if (!token || !signature || !rawBody) return false;
+    const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody);
+    const hexDigest = createHmac('sha1', token).update(payload).digest('hex');
+    const expected = Buffer.from(hexDigest).toString('base64');
+    return expected === signature;
+  }
 
   private policies(): Record<RateLimitPolicyName, Policy> {
     return {
@@ -84,6 +100,21 @@ export class RateLimitGuard implements CanActivate {
           return this.paystackService.isValidWebhookSignature(signature, rawBody);
         },
       },
+      anchor_webhook: {
+        windowMs: 60_000,
+        limit: 20,
+        key: (req) => `anchor_webhook:${ipOf(req)}`,
+        bypass: async (req) => {
+          const configured = (process.env.ANCHOR_WEBHOOK_IP_ALLOWLIST || '').split(',').map((s) => s.trim()).filter(Boolean);
+          const ip = ipOf(req);
+          if (configured.length > 0 && !configured.includes(ip)) {
+            return false;
+          }
+          const signature = req.headers?.['x-anchor-signature'] as string | undefined;
+          const rawBody = req.rawBody as Buffer | undefined;
+          return this.isValidAnchorWebhookSignature(signature, rawBody);
+        },
+      },
       paystack_banks: {
         windowMs: 60_000,
         limit: 60,
@@ -105,7 +136,7 @@ export class RateLimitGuard implements CanActivate {
 
     const policy = this.policies()[policyName] || this.policies().default;
 
-    if (policyName === 'paystack_webhook') {
+    if (policyName === 'paystack_webhook' || policyName === 'anchor_webhook') {
       const ok = await policy.bypass?.(req);
       if (!ok) {
         res.status(401).json({ message: 'Invalid webhook signature' });

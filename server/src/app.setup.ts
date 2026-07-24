@@ -39,7 +39,7 @@ export function configureApp(app: NestExpressApplication) {
       if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
       const portNum = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
       if (!Number.isFinite(portNum)) return false;
-      const okPort = portNum === 8080 || (portNum >= 5173 && portNum <= 5199);
+      const okPort = portNum === 8080 || portNum === 3001 || (portNum >= 5173 && portNum <= 5199);
       if (!okPort) return false;
       const host = url.hostname;
       if (host === 'localhost' || host === '127.0.0.1') return true;
@@ -68,9 +68,13 @@ export function configureApp(app: NestExpressApplication) {
 
     const path = req.originalUrl || req.url || '';
     if (path.startsWith('/api/auth/login') || path.startsWith('/api/auth/register')) return next();
+    if (path.startsWith('/api/auth/mobile/login') || path.startsWith('/api/auth/mobile/register') || path.startsWith('/api/auth/mobile/refresh')) return next();
     if (path.startsWith('/api/auth/logout')) return next();
     if (path.startsWith('/api/paystack/webhook')) return next();
     if (path.startsWith('/api/anchor/webhook')) return next();
+
+    const authorization = req.headers?.authorization;
+    if (typeof authorization === 'string' && authorization.startsWith('Bearer ')) return next();
 
     const cookieToken = req.cookies?.csrf_token;
     const headerToken = req.headers['x-csrf-token'];

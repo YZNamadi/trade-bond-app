@@ -9,6 +9,7 @@ export type RateLimitPolicyName =
   | 'admin_action'
   | 'bank_account_link'
   | 'paystack_webhook'
+  | 'anchor_webhook'
   | 'paystack_banks'
   | 'default';
 

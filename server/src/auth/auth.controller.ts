@@ -6,6 +6,31 @@ import { randomBytes } from 'crypto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RateLimit } from '../rate-limit/rate-limit.decorator';
+import { IsOptional, IsString, Length } from 'class-validator';
+
+class MobileLoginDto extends LoginDto {
+  @IsOptional()
+  @IsString()
+  @Length(8, 200)
+  deviceId?: string;
+}
+
+class MobileRegisterDto extends RegisterDto {
+  @IsOptional()
+  @IsString()
+  @Length(8, 200)
+  deviceId?: string;
+}
+
+class MobileRefreshDto {
+  @IsString()
+  @Length(16, 5000)
+  refreshToken: string;
+
+  @IsString()
+  @Length(8, 200)
+  deviceId: string;
+}
 
 @Controller('auth')
 export class AuthController {
@@ -97,6 +122,26 @@ export class AuthController {
     return { user: safeUser };
   }
 
+  @Post('mobile/login')
+  @RateLimit('auth_login')
+  async mobileLogin(
+    @Body() body: MobileLoginDto,
+    @Req() req: ExpressRequest,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    const deviceId = String(body.deviceId || '').trim() || randomBytes(16).toString('base64url');
+    const ip =
+      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ||
+      (req.socket as any)?.remoteAddress ||
+      null;
+    const user = await this.authService.validateUser(body.email, body.password, { ip, userAgent: userAgent || null });
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    const { accessToken, refreshToken, user: safeUser } = await this.authService.login(user, { deviceId, ip, userAgent: userAgent || null });
+    return { accessToken, refreshToken, deviceId, user: safeUser };
+  }
+
   @Post('register')
   @RateLimit('auth_register')
   async register(
@@ -114,6 +159,22 @@ export class AuthController {
     res.cookie('refresh_token', refreshToken, this.refreshCookieOptions());
     this.setCsrfCookie(res);
     return { user };
+  }
+
+  @Post('mobile/register')
+  @RateLimit('auth_register')
+  async mobileRegister(
+    @Body() body: MobileRegisterDto,
+    @Req() req: ExpressRequest,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    const deviceId = String(body.deviceId || '').trim() || randomBytes(16).toString('base64url');
+    const ip =
+      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ||
+      (req.socket as any)?.remoteAddress ||
+      null;
+    const { accessToken, refreshToken, user } = await this.authService.register(body, { deviceId, ip, userAgent: userAgent || null });
+    return { accessToken, refreshToken, deviceId, user };
   }
 
   @Post('refresh')
@@ -134,6 +195,29 @@ export class AuthController {
     res.cookie('refresh_token', nextRefreshToken, this.refreshCookieOptions());
     this.setCsrfCookie(res);
     return { ok: true };
+  }
+
+  @Post('mobile/refresh')
+  async mobileRefresh(
+    @Body() body: MobileRefreshDto,
+    @Req() req: ExpressRequest,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    const refreshToken = String(body.refreshToken || '').trim();
+    const deviceId = String(body.deviceId || '').trim();
+    if (!refreshToken || !deviceId) {
+      throw new UnauthorizedException('Missing refresh token');
+    }
+    const ip =
+      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ||
+      (req.socket as any)?.remoteAddress ||
+      null;
+    const { accessToken, refreshToken: nextRefreshToken, user } = await this.authService.refresh(refreshToken, {
+      deviceId,
+      ip,
+      userAgent: userAgent || null,
+    });
+    return { accessToken, refreshToken: nextRefreshToken, deviceId, user };
   }
 
   @UseGuards(AuthGuard('jwt'))

@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "TrustyTrade",
+    "slug": "trustytrade",
+    "scheme": "trustytrade",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1220"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.trustytrade.app"
+    },
+    "android": {
+      "package": "com.trustytrade.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B1220"
+      }
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-secure-store"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "86299c55-09ca-445e-8c87-c287b89be45f"
+      }
+    }
+  }
+}

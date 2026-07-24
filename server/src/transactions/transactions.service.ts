@@ -1,8 +1,10 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, DeepPartial, EntityManager, Repository } from 'typeorm';
-import { createHash, createHmac, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { Currency, Transaction, TransactionStatus } from './transaction.entity';
 import { PaystackService } from '../paystack/paystack.service';
@@ -35,6 +37,85 @@ function normalizeStatus(status: TransactionStatus): TransactionStatus {
     default:
       return status;
   }
+}
+
+function proofEncryptionKey(): Buffer {
+  const raw = process.env.EVIDENCE_ENCRYPTION_KEY_BASE64 || process.env.DATA_ENCRYPTION_KEY || '';
+  const isProd = process.env.NODE_ENV === 'production';
+  if (!raw) {
+    if (isProd) throw new InternalServerErrorException('Transaction proof key not configured');
+    return createHash('sha256').update('dev-only-transaction-proof-key').digest();
+  }
+  const buf = Buffer.from(raw, 'base64');
+  if (buf.length !== 32) {
+    throw new InternalServerErrorException('Transaction proof key is invalid');
+  }
+  return buf;
+}
+
+function transactionProofRootDir(transactionId: string): string {
+  const root = path.resolve(process.cwd(), 'uploads', 'tx-proofs', transactionId);
+  fs.mkdirSync(root, { recursive: true });
+  return root;
+}
+
+function scanTransactionProofOrFail(buffer: Buffer): void {
+  const isProd = process.env.NODE_ENV === 'production';
+  const required = (process.env.EVIDENCE_REQUIRE_VIRUS_SCAN || (isProd ? 'true' : 'false')) === 'true';
+  if (!required) return;
+  const mode = (process.env.EVIDENCE_VIRUS_SCAN_MODE || 'required').toLowerCase();
+  const cmd = mode === 'clamdscan' ? 'clamdscan' : mode === 'clamscan' ? 'clamscan' : '';
+  if (!cmd) {
+    throw new InternalServerErrorException('Virus scanner not configured');
+  }
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tt-tx-proof-'));
+  const tmpFile = path.join(tmpDir, 'proof.bin');
+  try {
+    fs.writeFileSync(tmpFile, buffer, { flag: 'wx' });
+    const out = execFileSync(cmd, ['--no-summary', tmpFile], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const ok = /: OK\s*$/m.test(out) || out.includes('OK');
+    if (!ok) throw new BadRequestException('Proof rejected');
+  } catch (e: any) {
+    const status = typeof e?.status === 'number' ? e.status : null;
+    if (status === 1) throw new BadRequestException('Proof rejected');
+    if (e instanceof BadRequestException) throw e;
+    throw new InternalServerErrorException('Virus scanner unavailable');
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+function encryptTransactionProof(buffer: Buffer): Buffer {
+  const key = proofEncryptionKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(buffer), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([Buffer.from('TTP1'), iv, tag, ciphertext]);
+}
+
+function decryptTransactionProof(buffer: Buffer): Buffer {
+  if (buffer.length < 32 || buffer.subarray(0, 4).toString('utf8') !== 'TTP1') {
+    return buffer;
+  }
+  const iv = buffer.subarray(4, 16);
+  const tag = buffer.subarray(16, 32);
+  const ciphertext = buffer.subarray(32);
+  const decipher = createDecipheriv('aes-256-gcm', proofEncryptionKey(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+function toPublicTransactionParty(user: Partial<User> | null | undefined, role: 'buyer' | 'seller') {
+  if (!user) return null;
+  return {
+    id: user.id ?? null,
+    fullName: user.fullName ?? null,
+    username: role === 'seller' ? (user.username ?? null) : null,
+    trustyTag: role === 'seller' ? (user.trustyTag ?? null) : null,
+    role: user.role ?? null,
+    isVerified: typeof user.isVerified === 'boolean' ? user.isVerified : null,
+  };
 }
 
 @Injectable()
@@ -71,6 +152,23 @@ export class TransactionsService {
 
   private supportsRowLock() {
     return this.dataSource.options.type === 'postgres';
+  }
+
+  private assertAnchorFundingMatches(tx: Transaction, input: { amountMinor: number; currency?: string | null }) {
+    const expectedAmountMinor = Math.round(Number(tx.amount || 0) * 100);
+    const paidAmountMinor = Math.round(Number(input.amountMinor || 0));
+    if (!Number.isFinite(paidAmountMinor) || paidAmountMinor !== expectedAmountMinor) {
+      throw new BadRequestException('Payment amount mismatch');
+    }
+    const expectedCurrency = String(tx.currency || Currency.NGN).trim().toUpperCase();
+    const paidCurrency = String(input.currency || expectedCurrency).trim().toUpperCase();
+    if (paidCurrency !== expectedCurrency) {
+      throw new BadRequestException('Payment currency mismatch');
+    }
+    return {
+      amountMinor: paidAmountMinor,
+      currency: paidCurrency,
+    };
   }
 
   private async loadForUpdate(manager: EntityManager, id: string) {
@@ -226,26 +324,17 @@ export class TransactionsService {
         updatedAt: true,
         buyer: {
           id: true,
-          email: true,
-          username: true,
           fullName: true,
-          phone: true,
           role: true,
           isVerified: true,
-          createdAt: true,
-          updatedAt: true,
         },
         seller: {
           id: true,
-          email: true,
           username: true,
           fullName: true,
-          phone: true,
           role: true,
           isVerified: true,
           trustyTag: true,
-          createdAt: true,
-          updatedAt: true,
         },
       },
       order: { createdAt: 'DESC' },
@@ -254,7 +343,14 @@ export class TransactionsService {
       t.status = normalizeStatus(t.status);
     }
     const visible = txs.filter((t) => normalizeStatus(t.status) !== TransactionStatus.CREATED);
-    return visible;
+    const unique = new Map<string, Transaction>();
+    for (const tx of visible) {
+      if (!tx?.id || unique.has(tx.id)) continue;
+      (tx as any).buyer = toPublicTransactionParty(tx.buyer, 'buyer');
+      (tx as any).seller = toPublicTransactionParty(tx.seller, 'seller');
+      unique.set(tx.id, tx);
+    }
+    return Array.from(unique.values());
   }
 
   async findOne(id: string, userId?: string, viewerRole?: string): Promise<Transaction> {
@@ -275,26 +371,17 @@ export class TransactionsService {
         updatedAt: true,
         buyer: {
           id: true,
-          email: true,
-          username: true,
           fullName: true,
-          phone: true,
           role: true,
           isVerified: true,
-          createdAt: true,
-          updatedAt: true,
         },
         seller: {
           id: true,
-          email: true,
           username: true,
           fullName: true,
-          phone: true,
           role: true,
           isVerified: true,
           trustyTag: true,
-          createdAt: true,
-          updatedAt: true,
         },
       },
     });
@@ -309,6 +396,8 @@ export class TransactionsService {
     if (userId && r === 'seller' && transaction.sellerId === userId && transaction.status === TransactionStatus.CREATED) {
       throw new NotFoundException(`Transaction #${id} not found`);
     }
+    (transaction as any).buyer = toPublicTransactionParty(transaction.buyer, 'buyer');
+    (transaction as any).seller = toPublicTransactionParty(transaction.seller, 'seller');
     return transaction;
   }
 
@@ -860,7 +949,10 @@ export class TransactionsService {
       if (movement.status !== 'COMPLETED') {
         return { transaction: pending, funded: false, paymentStatus: String(movement.status || 'pending').toLowerCase() };
       }
-      const amountMinor = Number(movement.amountMinor || 0);
+      const matchedPayment = this.assertAnchorFundingMatches(tx, {
+        amountMinor: Number(movement.amountMinor || 0),
+        currency: movement.currency,
+      });
       const ok = await this.atomicTransition(manager, {
         id: tx.id,
         from: TransactionStatus.CREATED,
@@ -888,8 +980,8 @@ export class TransactionsService {
       await this.ledgerService.recordInManager(manager, {
         transactionId: updated.id,
         eventType: 'PAYMENT_FUNDED',
-        amountMinor,
-        currency: String(movement.currency || updated.currency || Currency.NGN),
+        amountMinor: matchedPayment.amountMinor,
+        currency: matchedPayment.currency,
         provider: 'anchor',
         providerRef: reference,
         metadata: {
@@ -900,7 +992,7 @@ export class TransactionsService {
         updated.id,
         TransactionEventType.PAYMENT_VERIFIED,
         'Payment verified with provider',
-        { reference, provider: 'anchor', source: 'verify', amountMinor },
+        { reference, provider: 'anchor', source: 'verify', amountMinor: matchedPayment.amountMinor, currency: matchedPayment.currency },
         { userId, role: UserRole.BUYER },
         { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
         manager,
@@ -955,14 +1047,18 @@ export class TransactionsService {
       } as any);
       if (!tx) return null;
       const normalized = normalizeStatus(tx.status);
+      const matchedPayment = this.assertAnchorFundingMatches(tx, {
+        amountMinor: input.amountMinor,
+        currency: input.currency,
+      });
       await this.anchorService.upsertMovementFromWebhook({
         transactionId: tx.id,
         kind: 'PAYIN',
         reference: input.reference,
         providerObjectId: input.payinId,
         providerObjectType: 'PayIn',
-        amountMinor: input.amountMinor,
-        currency: input.currency,
+        amountMinor: matchedPayment.amountMinor,
+        currency: matchedPayment.currency,
         status: 'COMPLETED',
         metadata: {
           paidAt: input.paidAt ? input.paidAt.toISOString() : null,
@@ -996,8 +1092,8 @@ export class TransactionsService {
       await this.ledgerService.recordInManager(manager, {
         transactionId: saved.id,
         eventType: 'PAYMENT_FUNDED',
-        amountMinor: input.amountMinor,
-        currency: input.currency || String(saved.currency || Currency.NGN),
+        amountMinor: matchedPayment.amountMinor,
+        currency: matchedPayment.currency,
         provider: 'anchor',
         providerRef: input.reference,
         metadata: { payinId: input.payinId },
@@ -1006,7 +1102,7 @@ export class TransactionsService {
         saved.id,
         TransactionEventType.PAYMENT_VERIFIED,
         'Payment verified via Anchor webhook',
-        { reference: input.reference, provider: 'anchor', source: 'webhook', payinId: input.payinId },
+        { reference: input.reference, provider: 'anchor', source: 'webhook', payinId: input.payinId, amountMinor: matchedPayment.amountMinor, currency: matchedPayment.currency },
         null,
         { from: TransactionStatus.CREATED, to: TransactionStatus.FUNDED },
         manager,
@@ -1166,11 +1262,12 @@ export class TransactionsService {
     });
   }
 
-  async updateShipping(id: string, trackingId: string, userId: string, idempotencyKey?: string) {
+  async updateShipping(id: string, trackingId: string | undefined, userId: string, idempotencyKey?: string) {
+    const nextTrackingId = String(trackingId || '').trim() || null;
     return this.idempotencyService.run({
       scope: `tx:ship:${userId}:${id}`,
       key: idempotencyKey,
-      requestFingerprint: { id, trackingId },
+      requestFingerprint: { id, trackingId: nextTrackingId },
       handler: async () => {
         const saved = await this.dataSource.transaction(async (manager) => {
           const { tx, repo } = await this.loadForUpdate(manager, id);
@@ -1179,7 +1276,7 @@ export class TransactionsService {
           }
           const normalized = normalizeStatus(tx.status);
           if (normalized === TransactionStatus.SHIPPED) {
-            if (tx.trackingId && tx.trackingId !== trackingId) {
+            if (tx.trackingId && nextTrackingId && tx.trackingId !== nextTrackingId) {
               throw new BadRequestException('Tracking ID already set');
             }
             return tx;
@@ -1195,14 +1292,14 @@ export class TransactionsService {
             id: tx.id,
             from: TransactionStatus.FUNDED,
             to: TransactionStatus.SHIPPED,
-            set: { trackingId } as any,
+            set: { trackingId: nextTrackingId } as any,
           });
           const updated = await repo.findOne({ where: { id: tx.id }, relations: { buyer: true, seller: true } });
           if (!updated) throw new NotFoundException(`Transaction #${id} not found`);
           if (!ok) {
             const s = normalizeStatus(updated.status);
             if (s === TransactionStatus.SHIPPED) {
-              if (updated.trackingId && updated.trackingId !== trackingId) {
+              if (updated.trackingId && nextTrackingId && updated.trackingId !== nextTrackingId) {
                 throw new BadRequestException('Tracking ID already set');
               }
               return updated;
@@ -1217,7 +1314,7 @@ export class TransactionsService {
               updated.id,
               TransactionEventType.SHIPPING_UPDATED,
               'Seller marked order as shipped',
-              { trackingId },
+              nextTrackingId ? { trackingId: nextTrackingId } : undefined,
               { userId, role: UserRole.SELLER },
               { from: TransactionStatus.FUNDED, to: TransactionStatus.SHIPPED },
               manager,
@@ -1229,7 +1326,7 @@ export class TransactionsService {
               targetType: 'transaction',
               targetId: updated.id,
               before: { status: TransactionStatus.FUNDED },
-              after: { status: TransactionStatus.SHIPPED, trackingId },
+              after: nextTrackingId ? { status: TransactionStatus.SHIPPED, trackingId: nextTrackingId } : { status: TransactionStatus.SHIPPED },
               outcome: 'ok',
             }, manager);
           }
@@ -1488,8 +1585,8 @@ export class TransactionsService {
       paymentReferenceMasked: masked,
       createdAt: tx.createdAt,
       updatedAt: tx.updatedAt,
-      buyer: tx.buyer,
-      seller: tx.seller,
+      buyer: toPublicTransactionParty(tx.buyer, 'buyer'),
+      seller: toPublicTransactionParty(tx.seller, 'seller'),
     };
   }
 
@@ -1523,13 +1620,13 @@ export class TransactionsService {
     if (!allowed.includes(file.mimetype)) {
       throw new BadRequestException('Unsupported file type');
     }
+    scanTransactionProofOrFail(fileBuffer);
 
     const ext = file.mimetype === 'image/png' ? '.png' : file.mimetype === 'image/webp' ? '.webp' : '.jpg';
     const storedFileName = `${randomBytes(16).toString('hex')}${ext}`;
-    const uploadDir = path.resolve(process.cwd(), 'uploads', 'tx-proofs', tx.id);
-    fs.mkdirSync(uploadDir, { recursive: true });
+    const uploadDir = transactionProofRootDir(tx.id);
     const fullPath = path.join(uploadDir, storedFileName);
-    fs.writeFileSync(fullPath, fileBuffer, { flag: 'wx' });
+    fs.writeFileSync(fullPath, encryptTransactionProof(fileBuffer), { flag: 'wx' });
     const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
 
     const proof = this.transactionProofsRepository.create({
@@ -1692,11 +1789,16 @@ export class TransactionsService {
     const tx = await this.findOne(id, userId, viewerRole);
     const proof = await this.transactionProofsRepository.findOne({ where: { id: proofId, transactionId: tx.id } });
     if (!proof) throw new NotFoundException('Proof not found');
-    const uploadDir = path.resolve(process.cwd(), 'uploads', 'tx-proofs', tx.id);
+    const uploadDir = transactionProofRootDir(tx.id);
     const fullPath = path.join(uploadDir, proof.storedFileName);
     const rel = path.relative(uploadDir, fullPath);
     if (rel.startsWith('..') || path.isAbsolute(rel)) throw new NotFoundException('Proof not found');
     if (!fs.existsSync(fullPath)) throw new NotFoundException('Proof not found');
-    return { fullPath, mimeType: proof.mimeType, originalFileName: proof.originalFileName };
+    const decrypted = decryptTransactionProof(fs.readFileSync(fullPath));
+    const sha256 = createHash('sha256').update(decrypted).digest('hex');
+    if (sha256 !== proof.sha256) {
+      throw new InternalServerErrorException('Proof integrity check failed');
+    }
+    return { fileBuffer: decrypted, mimeType: proof.mimeType, originalFileName: proof.originalFileName };
   }
 }

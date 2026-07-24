@@ -13,7 +13,7 @@ export class AnchorController {
   ) {}
 
   @Post('webhook')
-  @RateLimit('paystack_webhook')
+  @RateLimit('anchor_webhook')
   async webhook(
     @Req() req: Request & { rawBody?: Buffer },
     @Res() res: Response,
@@ -113,7 +113,10 @@ export class AnchorController {
           payload,
         });
       }
-    } catch {
+      await this.anchorService.markProviderEventProcessed(providerEventId);
+    } catch (error: any) {
+      const message = String(error?.message || 'anchor_webhook_processing_failed');
+      await this.anchorService.markProviderEventFailed(providerEventId, message);
       return;
     }
   }

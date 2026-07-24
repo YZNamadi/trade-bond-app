@@ -154,7 +154,7 @@ export class TransactionsController {
     if (req.user?.role !== 'seller') {
       throw new ForbiddenException('Only sellers can mark shipped');
     }
-    return this.transactionsService.updateShipping(id, body.trackingId, req.user.userId, idempotencyKey);
+    return this.transactionsService.updateShipping(id, body?.trackingId, req.user.userId, idempotencyKey);
   }
 
   @Post(':id/dispute')
@@ -190,6 +190,6 @@ export class TransactionsController {
     const file = await this.transactionsService.getProofFile(id, proofId, req.user.userId, req.user.role);
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.originalFileName)}"`);
-    res.sendFile(file.fullPath);
+    res.send(file.fileBuffer);
   }
 }
