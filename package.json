@@ -4,10 +4,10 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "dev": "node --input-type=module -e \"import { spawn } from 'node:child_process'; const a = spawn('npm.cmd', ['--prefix','server','run','start:dev'], { stdio: 'inherit', shell: true }); const b = spawn('npm.cmd', ['run','dev:frontend'], { stdio: 'inherit', shell: true }); const onExit = (code) => process.exit(code ?? 0); a.on('exit', onExit); b.on('exit', onExit);\"",
+    "dev": "vite dev",
     "dev:frontend": "vite dev --host 127.0.0.1 --port 5173",
     "dev:frontend:lan": "vite dev --host 0.0.0.0 --port 5173",
-    "dev:server": "npm.cmd --prefix server run start:dev",
+    "dev:server": "npm --prefix server run start:dev",
     "build": "vite build",
     "build:mobile": "node --input-type=module -e \"import { spawn } from 'node:child_process'; const p = spawn('npm.cmd', ['run','build'], { stdio: 'inherit', shell: true, env: { ...process.env, CAPACITOR: 'true' } }); p.on('exit', (code) => process.exit(code ?? 0));\"",
     "cap:add:android": "npx.cmd cap add android",
