@@ -46,6 +46,8 @@ db.sqlite
 server/db.sqlite
 server/uploads/
 server/server/uploads/
+.dbg/
+debug-*.md
 
 # Mobile / native build artifacts
 android/.gradle/
